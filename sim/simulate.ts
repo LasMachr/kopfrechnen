@@ -41,7 +41,7 @@ const levelSlip = (levelId: string) => {
   return (STAGE_SLIP[levelId[0]] ?? 1) * extra;
 };
 
-class Learner {
+export class Learner {
   mem = new Map<string, Mem>();
   constructor(
     public p: Profile,

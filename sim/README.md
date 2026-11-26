@@ -14,3 +14,12 @@ Profile: stark, mittel, schwach, luecken-7x8 (6 schwere Fakten fehlen), langsam-
 Gewohnheiten: täglich 1 Runde, täglich 3 Runden, unregelmäßig, 10 Tage Pause.
 
 Das Lernermodell ist eine grobe Annahme. Aussagekräftig sind Vergleiche (vorher/nachher) und Hänger, keine exakten Tage.
+
+## Kapitel-Umbau
+
+`chapters.ts` baut die geplante Kapitel-Logik nach (Kapitelrunde streng im Kapitel, Mischrunde nur mit Geübtem, Empfehlung ab N fälligen Aufgaben) und vergleicht Schwellen, Regeln und wie oft man der Empfehlung folgt.
+
+```
+ORDER=plan TZ=Europe/Berlin npx tsx sim/chapters.ts 70 4      # Reihenfolge laut Plan
+ORDER=later12 TZ=Europe/Berlin npx tsx sim/chapters.ts 70 4   # großes Einmaleins als eigenes, späteres Kapitel
+```
