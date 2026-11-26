@@ -5,6 +5,8 @@ import type { Attempt, Derived, ItemState, LevelState, Placement } from './types
 export const DAY = 24 * 60 * 60 * 1000;
 export const WINDOW = 40;
 export const RECENT = 10;
+/** Spielraum für die Zielzeit beim Meistern */
+export const SPEED_SLACK = 1.5;
 
 /** Lokaler Kalendertag, z. B. "2026-11-26". */
 export function dayKey(ts: number): string {
@@ -79,6 +81,8 @@ export function checkMastery(level: Level, ls: LevelState, items: Map<string, It
   const acc = ls.window.filter((w) => w.correct).length / ls.window.length;
   if (acc < level.threshold) return false;
   if (level.items[0]?.type === 'fact') {
+    // Alle Fakten müssen eingeführt sein, sonst würden die schwersten (zuletzt eingeführten) nie geübt.
+    if (level.items.some((it) => (items.get(it.key)?.box ?? 0) === 0)) return false;
     const strong = level.items.filter((it) => (items.get(it.key)?.box ?? 0) >= 4).length;
     if (strong / level.items.length < 0.8) return false;
   } else {
@@ -90,7 +94,8 @@ export function checkMastery(level: Level, ls: LevelState, items: Map<string, It
   }
   const times = ls.window.filter((w) => w.correct && w.ms !== null).map((w) => w.ms!);
   const m = median(times);
-  if (m === null || m >= level.targetMs) return false;
+  // Gründlichkeit vor Tempo: Die Zielzeit bremst nur, wenn man deutlich darüber liegt.
+  if (m === null || m >= SPEED_SLACK * level.targetMs) return false;
   if (ls.firstTs === null || now - ls.firstTs < 7 * DAY - 60 * 60 * 1000) return false;
   if (ls.days.length < 3) return false;
   return true;
