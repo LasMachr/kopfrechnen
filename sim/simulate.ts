@@ -8,6 +8,7 @@ import { derive, DAY, dayKey } from '../src/lib/learn/derive';
 import { newRoundData, Round, roundsOnDay } from '../src/lib/learn/round';
 import type { RoundMode } from '../src/lib/learn/round';
 import { recommend } from '../src/lib/progress';
+import { deriveErrors } from '../src/lib/learn/errors';
 import { PlacementRun } from '../src/lib/learn/placement';
 import type { Attempt, Placement, Derived } from '../src/lib/learn/types';
 import { createRng, type Rng } from '../src/lib/math/rng';
@@ -317,7 +318,7 @@ export function run(profile: Profile, habit: Habit, days: number, seed: number):
       // wie in der App: „Weiter“ folgt der Empfehlung (Kapitelrunde, bei vielen Fälligen anderswo Mischrunde)
       const advice = recommend(derived, now, null);
       const mode: RoundMode = advice.mixed || !advice.chapter ? { kind: "mixed" } : { kind: "chapter", chapter: advice.chapter.id };
-      const data = newRoundData(derived, now, roundsOnDay(attempts, now), appRng, { seenCards, mode });
+      const data = newRoundData(derived, now, roundsOnDay(attempts, now), appRng, { seenCards, mode, errors: deriveErrors(attempts) });
       const round = new Round(data, derived, appRng);
       const log: RoundLog = { day, idx: ri, tasks: 0, firstTasks: 0, correct: 0, firstCorrect: 0, dueAtStart: data.dueAtStart, dueLeftAtEnd: 0, newIntro: 0, bySource: {}, byLevel: {}, cards: 0, blockedNew: data.dueAtStart > 30 };
       let guard = 0;

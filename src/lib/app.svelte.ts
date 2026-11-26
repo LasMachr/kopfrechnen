@@ -1,4 +1,6 @@
 import { derive, median } from './learn/derive';
+import { deriveErrors } from './learn/errors';
+import type { ErrorFolder } from './learn/errors';
 import type { Attempt, Derived, Placement } from './learn/types';
 import type { RoundData } from './learn/round';
 import { db, deleteMeta, getMeta, setMeta } from './store/db';
@@ -11,6 +13,8 @@ class AppState {
   attempts = $state.raw<Attempt[]>([]);
   placements = $state.raw<Placement[]>([]);
   derived = $state.raw<Derived | null>(null);
+  /** Fehler-Ordner, aus den Antworten abgeleitet */
+  errors = $state.raw<ErrorFolder>({ open: new Map(), cleared: 0 });
   needRefresh = $state(false);
   persisted = $state<boolean | null>(null);
   resumable = $state.raw<RoundData | null>(null);
@@ -57,6 +61,7 @@ class AppState {
 
   refresh(): void {
     this.derived = derive(this.attempts, this.placements);
+    this.errors = deriveErrors(this.attempts);
   }
 
   async addAttempt(a: Attempt): Promise<void> {

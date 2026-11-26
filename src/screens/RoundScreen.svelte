@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { app } from '../lib/app.svelte';
   import { derive } from '../lib/learn/derive';
+  import { ERROR_LABEL } from '../lib/learn/errors';
   import { newRoundData, Round, ROUND_MS, roundsOnDay, type CurrentTask, type Feedback, type RoundData, type RoundMode, type RoundSummary } from '../lib/learn/round';
   import { chapterById, chapterOfLevel } from '../lib/chapters';
   import { format } from '../lib/math/rational';
@@ -33,6 +34,11 @@
   let taskLeft = $state(1); // Anteil der Zeitgrenze beim Schätzen
   let summary = $state.raw<RoundSummary | null>(null);
   let calmShown = $state(false);
+  let errorsBefore = new Set<string>();
+  let errorsIn = $state(0);
+  let errorsOut = $state(0);
+  let lastErrorType = $state<string | null>(null);
+  let intoFolder = $state(false);
 
   let taskStart = 0;
   let interrupted = false;
@@ -43,7 +49,8 @@
   onMount(() => {
     const derived = derive(app.attempts, app.placements);
     const now = Date.now();
-    const data = resume ?? newRoundData(derived, now, roundsOnDay(app.attempts, now), rng, { seenCards: app.seenCards, mode });
+    const data = resume ?? newRoundData(derived, now, roundsOnDay(app.attempts, now), rng, { seenCards: app.seenCards, mode, errors: app.errors });
+    errorsBefore = new Set(app.errors.open.keys());
     roundMode = data.mode ?? { kind: 'mixed' };
     if (resume) data.current = null; // angefangene Aufgabe verwerfen
     round = new Round(data, derived, rng);
@@ -134,6 +141,8 @@
     lastAnswer = input;
     const res = round.answer(timeout && !input ? '' : input, rawMs, interrupted, Date.now());
     feedback = res.feedback;
+    intoFolder = !res.attempt.correct && !!res.attempt.firstInRound;
+    lastErrorType = res.attempt.errorType && res.attempt.errorType !== 'other' ? ERROR_LABEL[res.attempt.errorType] : null;
     await app.addAttempt(res.attempt);
     await app.saveRound(round.data);
     if (res.feedback.correct) {
@@ -160,6 +169,9 @@
     calmShown = summary.newlyUnlocked.length === 0 && summary.newlyMastered.length === 0 && summary.newlyPracticed.length === 0;
     await app.saveRound(null);
     app.refresh();
+    const after = new Set(app.errors.open.keys());
+    errorsIn = [...after].filter((k) => !errorsBefore.has(k)).length;
+    errorsOut = [...errorsBefore].filter((k) => !after.has(k)).length;
   }
 
   function endEarly() {
@@ -171,7 +183,8 @@
   function again() {
     const derived = derive(app.attempts, app.placements);
     const now = Date.now();
-    round = new Round(newRoundData(derived, now, roundsOnDay(app.attempts, now), rng, { seenCards: app.seenCards, mode: roundMode }), derived, rng);
+    round = new Round(newRoundData(derived, now, roundsOnDay(app.attempts, now), rng, { seenCards: app.seenCards, mode: roundMode, errors: app.errors }), derived, rng);
+    errorsBefore = new Set(app.errors.open.keys());
     elapsed = 0;
     summary = null;
     loadNext();
@@ -180,7 +193,13 @@
   const solution = (c: CurrentTask) => c.task.answerText ?? format(c.task.answer);
   const secs = (ms: number) => (ms / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
   const levelName = (id: string) => levelById.get(id)?.name ?? id;
-  const modeLabel = $derived(roundMode.kind === 'chapter' ? (chapterById.get(roundMode.chapter)?.name ?? '') : 'Mischrunde');
+  const modeLabel = $derived(
+    roundMode.kind === 'chapter'
+      ? (chapterById.get(roundMode.chapter)?.name ?? '')
+      : roundMode.kind === 'errors'
+        ? `Fehler${roundMode.chapter ? ` · ${chapterById.get(roundMode.chapter)?.name ?? ''}` : ''}`
+        : 'Mischrunde'
+  );
   /** Neu offene Abschnitte, aber nicht der erste eines Kapitels (der ist immer offen) */
   const openedSections = $derived(summary ? summary.newlyUnlocked.filter((id) => chapterOfLevel.get(id)?.sections[0] !== id) : []);
 </script>
@@ -214,7 +233,8 @@
             <div><span class="muted">Deine Antwort</span><b class="bad">{lastAnswer ? lastAnswer.replace('-', '−') : '–'}</b></div>
             <div><span class="muted">Richtig</span><b class="ok">{solution(current)}</b></div>
           </div>
-          {#if feedback.hint}<div class="hint">{feedback.hint}</div>{/if}
+          {#if feedback.hint}<div class="hint">{feedback.hint}</div>{:else if lastErrorType}<div class="hint">{lastErrorType}?</div>{/if}
+          {#if intoFolder}<div class="muted small">Kommt in den Fehler-Ordner.</div>{/if}
           {#if showSteps}
             <div class="steps">
               {#each current.task.steps as s}<div>{s}</div>{/each}
@@ -260,6 +280,9 @@
         <h1>Runde fertig</h1>
         <p class="muted">{modeLabel}</p>
         <p class="muted">{summary.count} Aufgaben, davon {summary.correct} richtig.</p>
+        {#if errorsIn || errorsOut}
+          <p class="muted">Fehler-Ordner: {errorsIn} neu{errorsOut ? `, ${errorsOut} erledigt` : ''}. Offen: {app.errors.open.size}.</p>
+        {/if}
         {#if summary.newlySure.length}
           <h2>Neu sicher</h2>
           <p class="sure">{summary.newlySure.slice(0, 12).join(', ')}{summary.newlySure.length > 12 ? ` und ${summary.newlySure.length - 12} weitere` : ''}</p>
@@ -382,6 +405,10 @@
   }
   .focus {
     font-size: 0.9rem;
+  }
+  .small {
+    font-size: 0.85rem;
+    margin-top: 6px;
   }
   .hint {
     margin-top: 10px;
