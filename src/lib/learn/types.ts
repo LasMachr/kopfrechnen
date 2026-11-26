@@ -12,7 +12,15 @@ export interface Attempt {
   first: boolean;
   /** schnell falsch (vermutlich sicher geglaubt) */
   fast: boolean;
-  kind: 'round' | 'placement';
+  /** 'practice' = gezielt geübt: zählt nicht für Fächer und Meistern */
+  kind: 'round' | 'placement' | 'practice';
+  /** Aufgabentext und Lösung (nur Einstufung, ab Version 0.2; ältere Einträge haben sie nicht) */
+  prompt?: string;
+  solution?: string;
+  /** erste Abfrage dieser Aufgabe in der Runde (keine Wiederholung, nicht gerade eingeführt). Für „Geübt“. Ältere Einträge haben das Feld nicht. */
+  firstInRound?: boolean;
+  /** Kapitel- oder Mischrunde, nur zur Auswertung */
+  mode?: 'chapter' | 'mixed';
 }
 
 export interface Placement {
@@ -53,6 +61,10 @@ export interface LevelState {
   times: number[]; // letzte 30 gültige Denkzeiten (richtig)
   firstTs: number | null;
   days: string[]; // Übungstage (erste Abfragen)
+  /** „Geübt“: alle Aufgaben eingeführt, mindestens 85 % der letzten 20 ersten Versuche richtig */
+  practiced: boolean;
+  everPracticed: boolean;
+  pwindow: boolean[];
 }
 
 export interface Derived {

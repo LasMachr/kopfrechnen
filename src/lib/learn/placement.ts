@@ -1,5 +1,5 @@
 import { checkAnswer } from '../math/answer';
-import { r } from '../math/rational';
+import { format, r } from '../math/rational';
 import type { Rng } from '../math/rng';
 import { itemByKey, levelById } from '../tasks';
 import type { Task } from '../tasks';
@@ -8,6 +8,7 @@ import type { Attempt, Placement } from './types';
 
 // Kurzer Einstufungstest: höchstens 5 Minuten, setzt nur Startpunkte.
 
+export const HARD_FACT_COUNT = 15;
 export const PLACEMENT_MS = 5 * 60 * 1000;
 
 const TYPING: [number, number][] = [
@@ -33,6 +34,9 @@ interface Entry {
   key: string;
   correct: boolean;
   rawMs: number;
+  answer: string;
+  prompt: string;
+  solution: string;
 }
 
 export class PlacementRun {
@@ -77,8 +81,11 @@ export class PlacementRun {
         key = this.rng.pick(pool).key;
       }
       const task = itemByKey.get(key)!.make(this.rng);
-      if (q.section === '1.1') task.prompt = task.prompt.includes('÷') ? remakeAsProduct(key) : task.prompt;
-      if (q.section === '1.1') task.answer = r(productOf(key));
+      if (q.section === '1.1') {
+        task.prompt = remakeAsProduct(key);
+        task.answer = r(productOf(key));
+        task.answerText = undefined;
+      }
       this.current = { section: q.section, task };
       return this.current;
     }
@@ -88,9 +95,19 @@ export class PlacementRun {
   answer(raw: string, rawMs: number): boolean {
     const cur = this.current!;
     const correct = checkAnswer(raw, cur.task.answer, cur.task.kind);
-    this.entries.push({ section: cur.section, key: cur.task.itemKey, correct, rawMs });
+    this.entries.push({
+      section: cur.section,
+      key: cur.task.itemKey,
+      correct,
+      rawMs,
+      answer: raw,
+      prompt: cur.task.prompt,
+      solution: cur.task.answerText ?? format(cur.task.answer)
+    });
     const errors = this.entries.filter((e) => e.section === cur.section && !e.correct).length;
-    if (cur.section !== 'tippen' && errors >= 2) this.skipped.add(cur.section);
+    // Die Einmaleins-Fakten laufen ganz durch: Einzelne Lücken sollen nicht alles andere verdecken.
+    if (cur.section !== 'tippen' && cur.section !== '1.1' && errors >= 2) this.skipped.add(cur.section);
+    if (cur.section === '1.1' && errors >= 8) this.skipped.add(cur.section);
     this.current = null;
     return correct;
   }
@@ -107,9 +124,11 @@ export class PlacementRun {
     const factErrors = facts.filter((e) => !e.correct).length;
     const target11 = levelById.get('1.1')!.targetMs;
     for (const e of facts) if (e.correct && think(e) <= 1.5 * target11) seeds[e.key] = 3;
-    if (facts.length >= HARD_FACTS.length && factErrors <= 1) {
-      // Die schweren Fakten sitzen: Die übrigen kommen als Wiederholung statt als neuer Stoff.
-      for (const it of levelById.get('1.1')!.items) if (!seeds[it.key]) seeds[it.key] = 2;
+    if (facts.length >= HARD_FACTS.length && factErrors <= 5) {
+      // Die meisten schweren Fakten sitzen: Die übrigen kommen als Wiederholung statt als neuer Stoff.
+      // Falsch beantwortete Fakten bleiben neu und werden mit Tipp-Karte eingeführt.
+      const wrong = new Set(facts.filter((e) => !e.correct).map((e) => e.key));
+      for (const it of levelById.get('1.1')!.items) if (!seeds[it.key] && !wrong.has(it.key)) seeds[it.key] = 2;
     }
     for (const id of LEVEL_TESTS) {
       const es = this.entries.filter((e) => e.section === id);
@@ -127,7 +146,9 @@ export class PlacementRun {
       levelId: e.section,
       ts: now - (this.entries.length - i),
       roundId,
-      answer: '',
+      answer: e.answer,
+      prompt: e.prompt,
+      solution: e.solution,
       correct: e.correct,
       ms: e.rawMs,
       first: false,

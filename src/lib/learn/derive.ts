@@ -1,3 +1,4 @@
+import { previousSection } from '../chapters';
 import { LEVELS, itemByKey, levelById } from '../tasks';
 import type { Level } from '../tasks';
 import type { Attempt, Derived, ItemState, LevelState, Placement } from './types';
@@ -5,6 +6,8 @@ import type { Attempt, Derived, ItemState, LevelState, Placement } from './types
 export const DAY = 24 * 60 * 60 * 1000;
 export const WINDOW = 40;
 export const RECENT = 10;
+/** Spielraum für die Zielzeit beim Meistern */
+export const SPEED_SLACK = 1.5;
 
 /** Lokaler Kalendertag, z. B. "2026-11-26". */
 export function dayKey(ts: number): string {
@@ -53,7 +56,20 @@ export function newItemState(key: string): ItemState {
 }
 
 function newLevelState(id: string): LevelState {
-  return { id, unlocked: false, mastered: false, everMastered: false, started: false, window: [], times: [], firstTs: null, days: [] };
+  return {
+    id,
+    unlocked: false,
+    mastered: false,
+    everMastered: false,
+    started: false,
+    window: [],
+    times: [],
+    firstTs: null,
+    days: [],
+    practiced: false,
+    everPracticed: false,
+    pwindow: []
+  };
 }
 
 /** Grenze für „langsam“: das 1,5-Fache des eigenen Medians in diesem Level. */
@@ -69,8 +85,9 @@ export function fastThreshold(ls: LevelState, level: Level): number {
   return Math.max(700, 0.5 * m);
 }
 
-export function fallbackThreshold(level: Level): number {
-  return Math.min(0.85, level.threshold - 0.07);
+/** Unter 85 % in den Wiederholungen fällt ein Abschnitt von „Sitzt“ auf „Geübt“ zurück. */
+export function fallbackThreshold(_level: Level): number {
+  return 0.85;
 }
 
 /** Prüft die Meister-Regeln für ein Level. */
@@ -79,6 +96,8 @@ export function checkMastery(level: Level, ls: LevelState, items: Map<string, It
   const acc = ls.window.filter((w) => w.correct).length / ls.window.length;
   if (acc < level.threshold) return false;
   if (level.items[0]?.type === 'fact') {
+    // Alle Fakten müssen eingeführt sein, sonst würden die schwersten (zuletzt eingeführten) nie geübt.
+    if (level.items.some((it) => (items.get(it.key)?.box ?? 0) === 0)) return false;
     const strong = level.items.filter((it) => (items.get(it.key)?.box ?? 0) >= 4).length;
     if (strong / level.items.length < 0.8) return false;
   } else {
@@ -90,10 +109,22 @@ export function checkMastery(level: Level, ls: LevelState, items: Map<string, It
   }
   const times = ls.window.filter((w) => w.correct && w.ms !== null).map((w) => w.ms!);
   const m = median(times);
-  if (m === null || m >= level.targetMs) return false;
+  // Gründlichkeit vor Tempo: Die Zielzeit bremst nur, wenn man deutlich darüber liegt.
+  if (m === null || m >= SPEED_SLACK * level.targetMs) return false;
   if (ls.firstTs === null || now - ls.firstTs < 7 * DAY - 60 * 60 * 1000) return false;
   if (ls.days.length < 3) return false;
   return true;
+}
+
+export const PRACTICE_WINDOW = 20;
+export const PRACTICE_THRESHOLD = 0.85;
+
+/** „Geübt“: alle Aufgaben eingeführt und mindestens 85 % der letzten 20 ersten Versuche richtig. Keine Zeitgrenze. */
+export function checkPracticed(level: Level, ls: LevelState, items: Map<string, ItemState>): boolean {
+  if (ls.mastered) return true;
+  if (level.items.some((it) => (items.get(it.key)?.box ?? 0) === 0)) return false;
+  if (ls.pwindow.length < PRACTICE_WINDOW) return false;
+  return ls.pwindow.filter(Boolean).length / ls.pwindow.length >= PRACTICE_THRESHOLD;
 }
 
 export function windowAccuracy(ls: LevelState): number | null {
@@ -138,10 +169,12 @@ export function derive(attempts: Attempt[], placements: Placement[]): Derived {
     applyAttempt(ev.a!, items, levels);
   }
 
-  // Freischalten
+  // Freischalten: Abschnitte eines Kapitels der Reihe nach, der nächste öffnet, sobald der vorige „Geübt“ ist.
   for (const l of LEVELS) {
     const ls = levels.get(l.id)!;
-    ls.unlocked = placementUnlocked.has(l.id) || ls.started || l.unlockAfter.every((id) => levels.get(id)!.everMastered);
+    const prev = previousSection(l.id);
+    const prevDone = prev === null || levels.get(prev)!.everPracticed || levels.get(prev)!.everMastered;
+    ls.unlocked = placementUnlocked.has(l.id) || ls.started || prevDone;
   }
   return { items, levels, baselineMs, placementDone: placements.length > 0 };
 }
@@ -167,6 +200,15 @@ export function applyAttempt(a: Attempt, items: Map<string, ItemState>, levels: 
     st.box = 1;
     st.due = addDays(a.ts, 1);
   }
+
+  // „Geübt“ (heute sicher): erste Versuche in der Runde, ohne Wiederholungen und ohne die Einführung
+  if (a.firstInRound ?? a.first) {
+    ls.pwindow.push(a.correct);
+    if (ls.pwindow.length > PRACTICE_WINDOW) ls.pwindow.shift();
+  }
+  ls.practiced = checkPracticed(level, ls, items);
+  if (ls.practiced) ls.everPracticed = true;
+
   if (!a.first) return;
 
   // Level-Fenster und Zeiten
@@ -180,10 +222,13 @@ export function applyAttempt(a: Attempt, items: Map<string, ItemState>, levels: 
   if (ls.firstTs === null) ls.firstTs = a.ts;
   if (!ls.days.includes(today)) ls.days.push(today);
 
+  // Rechenwege (Untertypen) bekommen dieselben Fächer und Abstände wie Fakten, damit sie wiederholt werden.
+  // Zusätzlich zählt für sie die Quote der letzten 10 ersten Abfragen.
   if (def.type === 'subtype') {
     st.recent.push(a.correct);
     if (st.recent.length > RECENT) st.recent.shift();
-  } else {
+  }
+  {
     st.extraDue = st.extraDue.filter((d) => d > a.ts);
     if (a.correct) {
       const canPromote = st.lastPromoteDay !== today;
@@ -217,6 +262,8 @@ export function applyAttempt(a: Attempt, items: Map<string, ItemState>, levels: 
   } else if (checkMastery(level, ls, items, a.ts)) {
     ls.mastered = true;
     ls.everMastered = true;
+    ls.practiced = true;
+    ls.everPracticed = true;
   }
 }
 

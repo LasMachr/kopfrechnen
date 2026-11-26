@@ -3,7 +3,7 @@ import type { Attempt, Derived, Placement } from './learn/types';
 import type { RoundData } from './learn/round';
 import { db, deleteMeta, getMeta, setMeta } from './store/db';
 
-export type Screen = 'loading' | 'install' | 'welcome' | 'placement' | 'home' | 'round' | 'progress';
+export type Screen = 'loading' | 'install' | 'welcome' | 'placement' | 'placement-result' | 'placement-review' | 'home' | 'chapter' | 'round' | 'progress';
 
 /** Gemeinsamer Zustand der App. */
 class AppState {
@@ -14,18 +14,45 @@ class AppState {
   needRefresh = $state(false);
   persisted = $state<boolean | null>(null);
   resumable = $state.raw<RoundData | null>(null);
+  /** schon gezeigte Tipp-Karten */
+  seenCards = $state.raw<string[]>([]);
+  /** zuletzt geübtes Kapitel (für „Weiter“) */
+  lastChapter = $state<number | null>(null);
+  /** Kapitel, bei denen der Hinweis auf fehlende Grundlagen schon kam */
+  prereqHinted = $state.raw<number[]>([]);
   updateSW: ((reload?: boolean) => Promise<void>) | null = null;
 
   async load(): Promise<void> {
     this.attempts = await db.attempts.orderBy('ts').toArray();
     this.placements = await db.placements.orderBy('ts').toArray();
     this.refresh();
+    this.seenCards = (await getMeta<string[]>('seenCards')) ?? [];
+    this.lastChapter = (await getMeta<number>('lastChapter')) ?? null;
+    this.prereqHinted = (await getMeta<number[]>('prereqHinted')) ?? [];
     const saved = await getMeta<RoundData>('activeRound');
     if (saved && Date.now() - saved.lastActive < 30 * 60 * 1000) this.resumable = saved;
     else {
       this.resumable = null;
       if (saved) await deleteMeta('activeRound');
     }
+  }
+
+  async markCardsSeen(ids: string[]): Promise<void> {
+    const all = [...new Set([...this.seenCards, ...ids])];
+    if (all.length === this.seenCards.length) return;
+    this.seenCards = all;
+    await setMeta('seenCards', all);
+  }
+
+  async setLastChapter(id: number): Promise<void> {
+    this.lastChapter = id;
+    await setMeta('lastChapter', id);
+  }
+
+  async markPrereqHinted(id: number): Promise<void> {
+    if (this.prereqHinted.includes(id)) return;
+    this.prereqHinted = [...this.prereqHinted, id];
+    await setMeta('prereqHinted', this.prereqHinted);
   }
 
   refresh(): void {
