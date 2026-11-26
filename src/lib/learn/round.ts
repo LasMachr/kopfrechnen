@@ -1,10 +1,13 @@
 import { checkAnswer, detectSlip, parseInput } from '../math/answer';
 import { eq, format } from '../math/rational';
+import { createRng } from '../math/rng';
 import type { Rng } from '../math/rng';
 import { chapterById, chapterOfLevel } from '../chapters';
 import { LEVELS, cardById, itemByKey, levelById } from '../tasks';
 import type { Level, Task } from '../tasks';
 import { applyAttempt, dayKey, fastThreshold, isDue, median } from './derive';
+import { classifyError, openErrors } from './errors';
+import type { ErrorFolder } from './errors';
 import type { Attempt, Derived } from './types';
 
 export const ROUND_MS = 5 * 60 * 1000;
@@ -23,11 +26,16 @@ export interface Requeue {
 export interface CurrentTask {
   task: Task;
   first: boolean;
-  source: 'requeue' | 'intro' | 'due' | 'new' | 'practice' | 'mastered' | 'extra';
+  source: 'requeue' | 'intro' | 'due' | 'new' | 'practice' | 'mastered' | 'extra' | 'error';
+  /** Zufallszahl, aus der die Aufgabe erzeugt wurde */
+  seed?: number;
 }
 
 /** Kapitelrunde: nur Aufgaben aus einem Kapitel, Neues aus dem aktuellen Abschnitt. Mischrunde: nur schon Eingeführtes aus allen Kapiteln. */
-export type RoundMode = { kind: 'chapter'; chapter: number } | { kind: 'mixed' };
+export type RoundMode = { kind: 'chapter'; chapter: number } | { kind: 'mixed' } | { kind: 'errors'; chapter?: number };
+
+/** Höchstens so viele offene Fehler kommen in einer Kapitel- oder Mischrunde dran. */
+export const MAX_ERRORS_PER_ROUND = 8;
 
 /** Alles, was zu einer laufenden Runde gehört. Reines JSON, damit es nach jeder Antwort gespeichert werden kann. */
 export interface RoundData {
@@ -56,7 +64,9 @@ export interface RoundData {
   /** Abschnitte, die bei Rundenbeginn schon „Geübt“ waren */
   practicedBefore?: string[];
   cardQueue?: string[];
-  afterCard?: { key: string; first: boolean; source: CurrentTask['source'] } | null;
+  afterCard?: { key: string; first: boolean; source: CurrentTask['source']; seed?: number } | null;
+  /** offene Fehler, die in dieser Runde drankommen; mit seed = genau dieselbe Aufgabe */
+  errorQueue?: { key: string; seed?: number }[];
   masteredTarget: number;
   masteredDone: number;
   lastNewLevel: string | null;
@@ -90,13 +100,15 @@ const typeOf = (key: string) => {
 export interface RoundOptions {
   /** schon gezeigte Tipp-Karten */
   seenCards?: string[];
-  /** Kapitel- oder Mischrunde (Standard: Mischrunde) */
+  /** Kapitel-, Misch- oder Fehlerrunde (Standard: Mischrunde) */
   mode?: RoundMode;
+  /** Fehler-Ordner, damit offene Fehler drankommen */
+  errors?: ErrorFolder;
 }
 
 /** Level-IDs, aus denen eine Runde Aufgaben nimmt (null = alle). */
 export function levelsOfMode(mode: RoundMode | undefined): Set<string> | null {
-  if (mode?.kind !== 'chapter') return null;
+  if (mode?.kind === 'mixed' || !mode || !('chapter' in mode) || !mode.chapter) return null;
   return new Set(chapterById.get(mode.chapter)?.sections ?? []);
 }
 
@@ -143,6 +155,11 @@ export function newRoundData(derived: Derived, now: number, roundsToday: number,
   }
   const levels = [...derived.levels.values()];
   const seenCards = new Set<string>(opts.seenCards ?? []);
+  // Offene Fehler: beim ersten Wiederholen genau dieselbe Aufgabe, danach ähnliche
+  const errs = opts.errors ? openErrors(opts.errors, allowed) : [];
+  let errorQueue: { key: string; seed?: number }[] = errs.map((e) => ({ key: e.itemKey, seed: e.repeats === 0 ? e.seed : undefined }));
+  if (opts.mode?.kind === 'errors') errorQueue = [...errorQueue, ...errs.map((e) => ({ key: e.itemKey }))];
+  else errorQueue = errorQueue.slice(0, MAX_ERRORS_PER_ROUND);
   return {
     id: `r${now.toString(36)}${Math.floor(rng.next() * 1e6).toString(36)}`,
     mode: opts.mode ?? { kind: 'mixed' },
@@ -163,6 +180,7 @@ export function newRoundData(derived: Derived, now: number, roundsToday: number,
     pendingCardNewLevel: false,
     seenCards: [...seenCards],
     servedOnce: [],
+    errorQueue,
     practicedBefore: levels.filter((l) => l.everPracticed || l.everMastered).map((l) => l.id),
     cardQueue: [],
     afterCard: null,
@@ -197,6 +215,13 @@ export class Round {
     return this.data.mode?.kind !== 'chapter';
   }
 
+  private serveError(): Step {
+    const e = this.data.errorQueue!.shift()!;
+    const st = this.derived.items.get(e.key)!;
+    const first = isDue(st, this.data.lastActive) && !this.data.askedFirst.includes(e.key);
+    return this.serve(e.key, first, 'error', e.seed);
+  }
+
   private inMode(l: Level): boolean {
     const a = this.allowed;
     return !a || a.has(l.id);
@@ -214,7 +239,7 @@ export class Round {
     if (d.afterCard) {
       const a = d.afterCard;
       d.afterCard = null;
-      return this.serve(a.key, a.first, a.source);
+      return this.serve(a.key, a.first, a.source, a.seed);
     }
 
     if (this.timeUp) d.ending = true;
@@ -230,6 +255,16 @@ export class Round {
     if (ri >= 0) {
       const [q] = d.requeue.splice(ri, 1);
       return this.serve(q.key, false, 'requeue');
+    }
+
+    // Nur Fehler üben: der Reihe nach durch den Ordner, dann ein zweiter Durchgang mit ähnlichen Aufgaben
+    if (d.mode?.kind === 'errors') {
+      if (d.errorQueue?.length) return this.serveError();
+      if (d.requeue.length) {
+        const [q] = d.requeue.splice(0, 1);
+        return this.serve(q.key, false, 'requeue');
+      }
+      return { type: 'end' };
     }
 
     // 2. Einführungsblock eines neuen Levels oder Tricks
@@ -267,6 +302,9 @@ export class Round {
     if (dueLeft.length && (!practice.length || this.rng.chance(0.7))) {
       return this.serve(dueLeft[0], true, 'due');
     }
+
+    // 5b. Offene Fehler (nach dem Fälligen)
+    if (d.errorQueue?.length && d.taskIndex >= 2) return this.serveError();
 
     // 6. Neues Häppchen (nur in der Kapitelrunde)
     if (!this.mixed && !chunkPending.length && d.dueAtStart <= MAX_DUE_FOR_NEW) {
@@ -383,7 +421,7 @@ export class Round {
     }
   }
 
-  private serve(key: string, first: boolean, source: CurrentTask['source']): Step {
+  private serve(key: string, first: boolean, source: CurrentTask['source'], seed?: number): Step {
     const def = itemByKey.get(key)!;
     // Wichtige Tricks kommen vorab: Hat diese Aufgabe eine noch nie gezeigte Tipp-Karte, erst die Karte.
     if (!this.data.seenCards.includes(def.card)) {
@@ -391,14 +429,15 @@ export class Round {
       this.data.pendingCardNewLevel = !level.cards.some((c) => this.data.seenCards.includes(c.id));
       this.data.pendingCard = def.card;
       this.data.seenCards.push(def.card);
-      this.data.afterCard = { key, first, source };
+      this.data.afterCard = { key, first, source, seed };
       return { type: 'card', cardId: def.card };
     }
-    const task = def.make(this.rng);
+    const taskSeed = seed ?? this.rng.int(1, 2 ** 31 - 1);
+    const task = def.make(createRng(taskSeed));
     if (first && !this.data.askedFirst.includes(key)) this.data.askedFirst.push(key);
     // Neu eingeführte Aufgaben zählen in dieser Runde nicht
     if (this.data.newThisRound.includes(key)) first = false;
-    const current: CurrentTask = { task, first, source };
+    const current: CurrentTask = { task, first, source, seed: taskSeed };
     this.data.current = current;
     return { type: 'task', current };
   }
@@ -417,7 +456,7 @@ export class Round {
     // Erste Abfrage in dieser Runde (nicht in der Einführung, keine Wiederholung): zählt für „Geübt“
     const servedOnce = (d.servedOnce ??= []);
     const firstInRound = cur.source !== 'intro' && cur.source !== 'requeue' && !servedOnce.includes(task.itemKey);
-    if (cur.source !== 'intro') servedOnce.push(task.itemKey);
+    if (firstInRound) servedOnce.push(task.itemKey);
     const attempt: Attempt = {
       itemKey: task.itemKey,
       levelId: task.levelId,
@@ -432,7 +471,9 @@ export class Round {
       prompt: task.prompt,
       solution: task.answerText ?? format(task.answer),
       firstInRound,
-      mode: d.mode?.kind ?? 'mixed'
+      mode: d.mode?.kind ?? 'mixed',
+      seed: cur.seed,
+      ...(correct ? {} : { errorType: classifyError(task, raw) })
     };
     applyAttempt(attempt, this.derived.items, this.derived.levels);
 

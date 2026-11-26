@@ -11,12 +11,14 @@
   let {
     onchapter,
     onmixed,
+    onerrors,
     onresume,
     onopen,
     onprogress
   }: {
     onchapter: (id: number) => void;
     onmixed: () => void;
+    onerrors: () => void;
     onresume: () => void;
     onopen: (id: number) => void;
     onprogress: () => void;
@@ -94,6 +96,10 @@
     {#if anyIntroduced}
       <button class="btn" onclick={onmixed}>Mischrunde · {rec.dueTotal} fällig</button>
     {/if}
+    {#if app.errors.open.size}
+      <div class="gap"></div>
+      <button class="btn" onclick={onerrors}>Fehler üben · {app.errors.open.size} offen</button>
+    {/if}
 
     <h2>Kapitel</h2>
     <div class="chapters">
@@ -101,6 +107,7 @@
         {@const share = sureShare(d, c.sections)}
         {@const weak = c.sections.some((s) => needsReview(d, s))}
         {@const isNext = !rec.mixed && rec.chapter?.id === c.id}
+        {@const errs = [...app.errors.open.values()].filter((e) => c.sections.includes(e.levelId)).length}
         <button class="chapter" class:next={isNext} onclick={() => onopen(c.id)}>
           <div class="crow">
             <span class="num">{c.id}</span>
@@ -109,7 +116,7 @@
             {#if isNext}<span class="star">★ Als Nächstes</span>{/if}
           </div>
           <div class="cbar"><div class="cfill" style:width="{Math.round(share * 100)}%"></div></div>
-          <div class="cstatus muted">{statusText(c)}{weak ? ' · etwas wiederholen' : ''}</div>
+          <div class="cstatus muted">{statusText(c)}{weak ? ' · etwas wiederholen' : ''}{errs ? ` · ${errs} Fehler offen` : ''}</div>
         </button>
       {/each}
     </div>

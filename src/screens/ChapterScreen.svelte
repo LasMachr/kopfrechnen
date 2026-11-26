@@ -3,21 +3,30 @@
   import { chapterById } from '../lib/chapters';
   import { median } from '../lib/learn/derive';
   import { currentSection, dueKeys } from '../lib/learn/round';
+  import { ERROR_CLEAR_DAYS, ERROR_LABEL, openErrors } from '../lib/learn/errors';
+  import type { ErrorType } from '../lib/learn/errors';
   import { chapterStarted, needsReview, sectionStatus, STATUS_LABEL, sureShare } from '../lib/progress';
   import { levelById } from '../lib/tasks';
   import TipCard from '../components/TipCard.svelte';
 
-  let { id, onback, onstart }: { id: number; onback: () => void; onstart: () => void } = $props();
+  let { id, onback, onstart, onerrors }: { id: number; onback: () => void; onstart: () => void; onerrors: () => void } = $props();
 
   const d = $derived(app.derived!);
   const c = $derived(chapterById.get(id)!);
-  type Tab = 'intro' | 'practice' | 'analysis';
+  type Tab = 'intro' | 'practice' | 'analysis' | 'errors';
   // svelte-ignore state_referenced_locally
   let tab = $state<Tab>(chapterStarted(app.derived!, chapterById.get(id)!) ? 'practice' : 'intro');
   let openCard = $state<string | null>(null);
 
   const due = $derived(dueKeys(d, Date.now(), id).length);
   const current = $derived(currentSection(d, id));
+  const errors = $derived(openErrors(app.errors, new Set(c.sections)).reverse());
+  const errorTypes = $derived.by(() => {
+    const m = new Map<ErrorType, number>();
+    for (const e of errors) m.set(e.type, (m.get(e.type) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  });
+  const dateText = (ts: number) => new Date(ts).toLocaleDateString('de-DE', { day: 'numeric', month: 'numeric' });
 
   const nums = [2, 3, 4, 5, 6, 7, 8, 9, 10];
   const boxOf = (a: number, b: number) => d.items.get(`1.1:${a}x${b}`)?.box ?? 0;
@@ -58,6 +67,7 @@
     <button role="tab" aria-selected={tab === 'intro'} class:on={tab === 'intro'} onclick={() => (tab = 'intro')}>Einführung</button>
     <button role="tab" aria-selected={tab === 'practice'} class:on={tab === 'practice'} onclick={() => (tab = 'practice')}>Üben</button>
     <button role="tab" aria-selected={tab === 'analysis'} class:on={tab === 'analysis'} onclick={() => (tab = 'analysis')}>Analyse</button>
+    <button role="tab" aria-selected={tab === 'errors'} class:on={tab === 'errors'} onclick={() => (tab = 'errors')}>Fehler{errors.length ? ` ${errors.length}` : ''}</button>
   </div>
 
   <div class="scroll content">
@@ -93,6 +103,37 @@
         Ein Abschnitt ist „Geübt“, wenn alles eingeführt ist und 85 % der letzten 20 Antworten stimmen. Dann öffnet der nächste. „Sitzt“ heißt: auch nach Tagen noch sicher.
       </p>
       <button class="btn primary big" onclick={onstart}>5 Minuten üben</button>
+      {#if errors.length}
+        <div class="gap"></div>
+        <button class="btn" onclick={onerrors}>Nur Fehler üben · {errors.length}</button>
+      {/if}
+    {:else if tab === 'errors'}
+      {#if !errors.length}
+        <p class="muted">Keine offenen Fehler in diesem Kapitel.</p>
+        <p class="muted small">Jede falsche erste Antwort landet hier. Sie verschwindet wieder, wenn du die Aufgabe an {ERROR_CLEAR_DAYS} verschiedenen Tagen richtig gelöst hast.</p>
+      {:else}
+        <p class="muted small">Ein Fehler verschwindet, wenn du die Aufgabe an {ERROR_CLEAR_DAYS} verschiedenen Tagen richtig gelöst hast. Beim ersten Mal kommt genau dieselbe Aufgabe, danach ähnliche.</p>
+        {#if errorTypes.length > 1 || errorTypes[0]?.[0] !== 'other'}
+          <div class="chips">
+            {#each errorTypes as [t, n]}<span class="chip">{ERROR_LABEL[t]} · {n}</span>{/each}
+          </div>
+        {/if}
+        <button class="btn primary" onclick={onerrors}>Nur Fehler üben · {errors.length}</button>
+        <div class="gap"></div>
+        <div class="errlist">
+          {#each errors as e (e.itemKey)}
+            <div class="err">
+              <div class="erow"><b>{e.prompt}</b><span class="muted small">{dateText(e.ts)}</span></div>
+              <div class="small">
+                Du: <span class="bad">{e.answer ? e.answer.replace('-', '−') : '–'}</span> · Richtig: <span class="ok">{e.solution}</span>
+              </div>
+              <div class="muted small">
+                {ERROR_LABEL[e.type]}{e.okDays.length ? ` · ${e.okDays.length} von ${ERROR_CLEAR_DAYS} Tagen richtig` : ''}
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
     {:else}
       {#if id === 1}
         <h2>Einmaleins-Raster</h2>
@@ -127,7 +168,7 @@
           {/if}
         </div>
       {/each}
-      <p class="muted small">Schwachstellen und Fehlermuster kommen in einer der nächsten Versionen.</p>
+      <p class="muted small">Schwachstellen und Verlauf kommen in einer der nächsten Versionen.</p>
     {/if}
     <div class="bottom"></div>
   </div>
@@ -258,5 +299,45 @@
   }
   .bottom {
     height: 24px;
+  }
+  .gap {
+    height: 10px;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0 12px;
+  }
+  .chip {
+    background: var(--surface-2);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.85rem;
+  }
+  .errlist {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .err {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+  .erow {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 1.1rem;
+    margin-bottom: 4px;
+  }
+  .bad {
+    color: var(--bad);
+    font-weight: 600;
+  }
+  .ok {
+    color: var(--ok);
+    font-weight: 600;
   }
 </style>

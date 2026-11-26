@@ -72,7 +72,7 @@
   }
 
   function exitRound() {
-    app.screen = roundFrom === 'chapter' && roundMode.kind === 'chapter' ? 'chapter' : 'home';
+    app.screen = roundFrom === 'chapter' && roundMode.kind !== 'mixed' ? 'chapter' : 'home';
   }
 
   async function skipPlacement() {
@@ -97,12 +97,13 @@
   <Home
     onchapter={startChapter}
     onmixed={() => go({ kind: 'mixed' })}
+    onerrors={() => go({ kind: 'errors' })}
     onresume={() => go({ kind: 'mixed' }, true)}
     onopen={openChapter}
     onprogress={() => (app.screen = 'progress')}
   />
 {:else if app.screen === 'chapter'}
-  <ChapterScreen id={chapterId} onback={() => (app.screen = 'home')} onstart={() => startChapter(chapterId)} />
+  <ChapterScreen id={chapterId} onback={() => (app.screen = 'home')} onstart={() => startChapter(chapterId)} onerrors={() => go({ kind: 'errors', chapter: chapterId })} />
 {:else if app.screen === 'round'}
   {#key roundKey}
     <RoundScreen resume={resumeData} mode={roundMode} onexit={exitRound} />

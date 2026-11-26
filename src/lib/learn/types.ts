@@ -19,8 +19,12 @@ export interface Attempt {
   solution?: string;
   /** erste Abfrage dieser Aufgabe in der Runde (keine Wiederholung, nicht gerade eingeführt). Für „Geübt“. Ältere Einträge haben das Feld nicht. */
   firstInRound?: boolean;
-  /** Kapitel- oder Mischrunde, nur zur Auswertung */
-  mode?: 'chapter' | 'mixed';
+  /** Kapitel-, Misch- oder Fehlerrunde, nur zur Auswertung */
+  mode?: 'chapter' | 'mixed' | 'errors';
+  /** Zufallszahl, aus der die Aufgabe erzeugt wurde: damit lässt sich genau dieselbe Aufgabe wiederholen */
+  seed?: number;
+  /** Fehlerart bei falscher Antwort */
+  errorType?: import('./errors').ErrorType;
 }
 
 export interface Placement {
