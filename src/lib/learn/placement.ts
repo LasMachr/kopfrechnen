@@ -90,7 +90,9 @@ export class PlacementRun {
     const correct = checkAnswer(raw, cur.task.answer, cur.task.kind);
     this.entries.push({ section: cur.section, key: cur.task.itemKey, correct, rawMs });
     const errors = this.entries.filter((e) => e.section === cur.section && !e.correct).length;
-    if (cur.section !== 'tippen' && errors >= 2) this.skipped.add(cur.section);
+    // Die Einmaleins-Fakten laufen ganz durch: Einzelne Lücken sollen nicht alles andere verdecken.
+    if (cur.section !== 'tippen' && cur.section !== '1.1' && errors >= 2) this.skipped.add(cur.section);
+    if (cur.section === '1.1' && errors >= 8) this.skipped.add(cur.section);
     this.current = null;
     return correct;
   }
@@ -107,9 +109,11 @@ export class PlacementRun {
     const factErrors = facts.filter((e) => !e.correct).length;
     const target11 = levelById.get('1.1')!.targetMs;
     for (const e of facts) if (e.correct && think(e) <= 1.5 * target11) seeds[e.key] = 3;
-    if (facts.length >= HARD_FACTS.length && factErrors <= 1) {
-      // Die schweren Fakten sitzen: Die übrigen kommen als Wiederholung statt als neuer Stoff.
-      for (const it of levelById.get('1.1')!.items) if (!seeds[it.key]) seeds[it.key] = 2;
+    if (facts.length >= HARD_FACTS.length && factErrors <= 5) {
+      // Die meisten schweren Fakten sitzen: Die übrigen kommen als Wiederholung statt als neuer Stoff.
+      // Falsch beantwortete Fakten bleiben neu und werden mit Tipp-Karte eingeführt.
+      const wrong = new Set(facts.filter((e) => !e.correct).map((e) => e.key));
+      for (const it of levelById.get('1.1')!.items) if (!seeds[it.key] && !wrong.has(it.key)) seeds[it.key] = 2;
     }
     for (const id of LEVEL_TESTS) {
       const es = this.entries.filter((e) => e.section === id);

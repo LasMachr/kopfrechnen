@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyAttempt, DAY, derive, isDue } from '../src/lib/learn/derive';
+import { applyAttempt, checkMastery, DAY, derive, isDue } from '../src/lib/learn/derive';
 import { newRoundData, Round, ROUND_MS } from '../src/lib/learn/round';
 import { PlacementRun } from '../src/lib/learn/placement';
 import type { Attempt, Placement } from '../src/lib/learn/types';
@@ -175,17 +175,68 @@ describe('Einstufungstest', () => {
     expect([...d.levels.values()].some((l) => l.mastered)).toBe(false);
   });
 
-  it('bricht einen Teil nach 2 Fehlern ab', () => {
+  it('bricht einen Level-Teil nach 2 Fehlern ab, das Einmaleins erst nach 8', () => {
     const rng = createRng(8);
     const run = new PlacementRun(rng, T0);
     let task;
     let count11 = 0;
+    let count12 = 0;
     while ((task = run.next(T0))) {
       if (task.section === '1.1') {
         count11++;
         run.answer('0', 1000);
+      } else if (task.section === '1.2') {
+        count12++;
+        run.answer('0', 1000);
       } else run.answer(String(task.task.answer.n), 1000);
     }
-    expect(count11).toBe(2);
+    expect(count11).toBe(8);
+    expect(count12).toBe(2);
+  });
+
+  it('einzelne Lücken im Einmaleins: die übrigen Fakten starten trotzdem als Wiederholung', () => {
+    const rng = createRng(8);
+    const run = new PlacementRun(rng, T0);
+    const gaps = new Set(['1.1:7x8', '1.1:8x7', '1.1:6x8', '1.1:8x6', '1.1:7x6']);
+    let task;
+    let now = T0;
+    while ((task = run.next(now))) {
+      const t = task.task;
+      const right = t.answer.d === 1 ? String(t.answer.n) : format(t.answer, { group: false });
+      now += 1500;
+      run.answer(gaps.has(t.itemKey) ? '0' : right, 1200);
+    }
+    const p = run.result(now);
+    for (const k of gaps) expect(p.seeds[k]).toBeUndefined();
+    expect(p.seeds['1.1:2x2']).toBe(2);
+    expect(p.seeds['1.1:9x9']).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('Meistern', () => {
+  it('ein Fakten-Level gilt erst als gemeistert, wenn alle Fakten eingeführt sind', () => {
+    const level = levelById.get('1.1')!;
+    const d = derive([], []);
+    const ls = d.levels.get('1.1')!;
+    ls.window = Array.from({ length: 40 }, (_, i) => ({ correct: true, ms: 1000, ts: T0 + i }));
+    ls.firstTs = T0;
+    ls.days = ['a', 'b', 'c'];
+    level.items.forEach((it, i) => (d.items.get(it.key)!.box = i < 70 ? 5 : 0));
+    expect(checkMastery(level, ls, d.items, T0 + 8 * DAY)).toBe(false);
+    level.items.forEach((it, i) => (d.items.get(it.key)!.box = i < 70 ? 5 : 1));
+    expect(checkMastery(level, ls, d.items, T0 + 8 * DAY)).toBe(true);
+  });
+
+  it('Zielzeit mit Spielraum: etwas über der Zielzeit reicht, deutlich darüber nicht', () => {
+    const level = levelById.get('1.1')!;
+    const d = derive([], []);
+    const ls = d.levels.get('1.1')!;
+    ls.firstTs = T0;
+    ls.days = ['a', 'b', 'c'];
+    level.items.forEach((it) => (d.items.get(it.key)!.box = 5));
+    ls.window = Array.from({ length: 40 }, (_, i) => ({ correct: true, ms: 4000, ts: T0 + i }));
+    expect(checkMastery(level, ls, d.items, T0 + 8 * DAY)).toBe(true);
+    ls.window = Array.from({ length: 40 }, (_, i) => ({ correct: true, ms: 4600, ts: T0 + i }));
+    expect(checkMastery(level, ls, d.items, T0 + 8 * DAY)).toBe(false);
   });
 });
