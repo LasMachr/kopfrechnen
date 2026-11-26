@@ -3,7 +3,7 @@ import type { Attempt, Derived, Placement } from './learn/types';
 import type { RoundData } from './learn/round';
 import { db, deleteMeta, getMeta, setMeta } from './store/db';
 
-export type Screen = 'loading' | 'install' | 'welcome' | 'placement' | 'placement-result' | 'placement-review' | 'home' | 'round' | 'progress' | 'topics';
+export type Screen = 'loading' | 'install' | 'welcome' | 'placement' | 'placement-result' | 'placement-review' | 'home' | 'chapter' | 'round' | 'progress';
 
 /** Gemeinsamer Zustand der App. */
 class AppState {
@@ -16,8 +16,10 @@ class AppState {
   resumable = $state.raw<RoundData | null>(null);
   /** schon gezeigte Tipp-Karten */
   seenCards = $state.raw<string[]>([]);
-  /** Level, deren Freischaltung schon angesagt wurde */
-  announced = $state.raw<string[]>([]);
+  /** zuletzt geübtes Kapitel (für „Weiter“) */
+  lastChapter = $state<number | null>(null);
+  /** Kapitel, bei denen der Hinweis auf fehlende Grundlagen schon kam */
+  prereqHinted = $state.raw<number[]>([]);
   updateSW: ((reload?: boolean) => Promise<void>) | null = null;
 
   async load(): Promise<void> {
@@ -25,13 +27,8 @@ class AppState {
     this.placements = await db.placements.orderBy('ts').toArray();
     this.refresh();
     this.seenCards = (await getMeta<string[]>('seenCards')) ?? [];
-    const announced = await getMeta<string[]>('announcedLevels');
-    if (announced) this.announced = announced;
-    else {
-      // erster Start dieser Version: was schon offen ist, gilt als angesagt
-      this.announced = [...this.derived!.levels.values()].filter((l) => l.unlocked).map((l) => l.id);
-      await setMeta('announcedLevels', this.announced);
-    }
+    this.lastChapter = (await getMeta<number>('lastChapter')) ?? null;
+    this.prereqHinted = (await getMeta<number[]>('prereqHinted')) ?? [];
     const saved = await getMeta<RoundData>('activeRound');
     if (saved && Date.now() - saved.lastActive < 30 * 60 * 1000) this.resumable = saved;
     else {
@@ -47,15 +44,15 @@ class AppState {
     await setMeta('seenCards', all);
   }
 
-  /** Neu freigeschaltete Level, die noch nicht angesagt wurden. */
-  get newlyUnlocked(): string[] {
-    if (!this.derived) return [];
-    return [...this.derived.levels.values()].filter((l) => l.unlocked && !this.announced.includes(l.id)).map((l) => l.id);
+  async setLastChapter(id: number): Promise<void> {
+    this.lastChapter = id;
+    await setMeta('lastChapter', id);
   }
 
-  async acknowledgeUnlocked(): Promise<void> {
-    this.announced = [...new Set([...this.announced, ...this.newlyUnlocked])];
-    await setMeta('announcedLevels', this.announced);
+  async markPrereqHinted(id: number): Promise<void> {
+    if (this.prereqHinted.includes(id)) return;
+    this.prereqHinted = [...this.prereqHinted, id];
+    await setMeta('prereqHinted', this.prereqHinted);
   }
 
   refresh(): void {

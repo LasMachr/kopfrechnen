@@ -22,7 +22,7 @@
         {#each report.sections as s}
           <div class="row">
             <div>
-              <b>{s.levelId}</b> {s.name}
+              <b>{s.name}</b>
               {#if s.stoppedEarly}<div class="muted small">nach 2 Fehlern beendet</div>{/if}
             </div>
             <div class="right">

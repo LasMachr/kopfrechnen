@@ -2,7 +2,8 @@
   import { onDestroy, onMount } from 'svelte';
   import { app } from '../lib/app.svelte';
   import { derive } from '../lib/learn/derive';
-  import { newRoundData, Round, ROUND_MS, roundsOnDay, type CurrentTask, type Feedback, type RoundData, type RoundSummary } from '../lib/learn/round';
+  import { newRoundData, Round, ROUND_MS, roundsOnDay, type CurrentTask, type Feedback, type RoundData, type RoundMode, type RoundSummary } from '../lib/learn/round';
+  import { chapterById, chapterOfLevel } from '../lib/chapters';
   import { format } from '../lib/math/rational';
   import { createRng } from '../lib/math/rng';
   import { cardById, itemByKey, levelById } from '../lib/tasks';
@@ -10,7 +11,7 @@
   import AnswerBox from '../components/AnswerBox.svelte';
   import TipCard from '../components/TipCard.svelte';
 
-  let { resume, focusLevel = null, onexit }: { resume: RoundData | null; focusLevel?: string | null; onexit: () => void } = $props();
+  let { resume, mode = { kind: 'mixed' }, onexit }: { resume: RoundData | null; mode?: RoundMode; onexit: () => void } = $props();
 
   const rng = createRng();
   let round: Round;
@@ -20,7 +21,7 @@
   let cardId = $state<string | null>(null);
   let cardNewLevel = $state(false);
   let showTip = $state(false);
-  let focus = $state<string | null>(null);
+  let roundMode = $state.raw<RoundMode>({ kind: 'mixed' });
   let current = $state.raw<CurrentTask | null>(null);
   let input = $state('');
   let locked = $state(false);
@@ -42,8 +43,8 @@
   onMount(() => {
     const derived = derive(app.attempts, app.placements);
     const now = Date.now();
-    const data = resume ?? newRoundData(derived, now, roundsOnDay(app.attempts, now), rng, { seenCards: app.seenCards, focusLevel: focusLevel ?? undefined });
-    focus = data.focusLevel ?? null;
+    const data = resume ?? newRoundData(derived, now, roundsOnDay(app.attempts, now), rng, { seenCards: app.seenCards, mode });
+    roundMode = data.mode ?? { kind: 'mixed' };
     if (resume) data.current = null; // angefangene Aufgabe verwerfen
     round = new Round(data, derived, rng);
     elapsed = data.elapsedMs;
@@ -156,7 +157,7 @@
   async function finish() {
     phase = 'end';
     summary = round.summary(app.previousTimes(round.data.startedAt));
-    calmShown = summary.newlyUnlocked.length === 0 && summary.newlyMastered.length === 0;
+    calmShown = summary.newlyUnlocked.length === 0 && summary.newlyMastered.length === 0 && summary.newlyPracticed.length === 0;
     await app.saveRound(null);
     app.refresh();
   }
@@ -170,7 +171,7 @@
   function again() {
     const derived = derive(app.attempts, app.placements);
     const now = Date.now();
-    round = new Round(newRoundData(derived, now, roundsOnDay(app.attempts, now), rng, { seenCards: app.seenCards, focusLevel: focus ?? undefined }), derived, rng);
+    round = new Round(newRoundData(derived, now, roundsOnDay(app.attempts, now), rng, { seenCards: app.seenCards, mode: roundMode }), derived, rng);
     elapsed = 0;
     summary = null;
     loadNext();
@@ -178,14 +179,17 @@
 
   const solution = (c: CurrentTask) => c.task.answerText ?? format(c.task.answer);
   const secs = (ms: number) => (ms / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
-  const levelName = (id: string) => `${id} ${levelById.get(id)?.name ?? ''}`;
+  const levelName = (id: string) => levelById.get(id)?.name ?? id;
+  const modeLabel = $derived(roundMode.kind === 'chapter' ? (chapterById.get(roundMode.chapter)?.name ?? '') : 'Mischrunde');
+  /** Neu offene Abschnitte, aber nicht der erste eines Kapitels (der ist immer offen) */
+  const openedSections = $derived(summary ? summary.newlyUnlocked.filter((id) => chapterOfLevel.get(id)?.sections[0] !== id) : []);
 </script>
 
 <div class="screen">
   {#if phase !== 'end'}
     <div class="topbar">
       <button class="link" onclick={endEarly}>Beenden</button>
-      {#if focus}<span class="focus muted">{focus}</span>{/if}
+      <span class="focus muted">{modeLabel}</span>
       <div class="bar" aria-hidden="true"><div class="fill" style:width="{Math.min(100, (elapsed / ROUND_MS) * 100)}%"></div></div>
     </div>
   {/if}
@@ -239,10 +243,14 @@
     {#if !calmShown}
       <div class="calm">
         {#each summary.newlyMastered as id}
-          <p class="big">Gemeistert: {levelName(id)}</p>
+          <p class="big">Sitzt: {levelName(id)}</p>
         {/each}
-        {#each summary.newlyUnlocked as id}
-          <p class="big">Neu offen: {levelName(id)}</p>
+        {#each summary.newlyPracticed.filter((id) => !summary!.newlyMastered.includes(id)) as id}
+          <p class="big">Geübt: {levelName(id)}</p>
+        {/each}
+        {#each openedSections as id}
+          <p class="big">Neuer Abschnitt offen: {levelName(id)}</p>
+          <p class="muted">Die Tipps dazu kommen in der nächsten Kapitelrunde, bevor die erste Aufgabe dran ist.</p>
         {/each}
         <div class="grow"></div>
         <button class="btn primary" onclick={() => (calmShown = true)}>Weiter</button>
@@ -250,9 +258,7 @@
     {:else}
       <div class="end scroll">
         <h1>Runde fertig</h1>
-        {#if focus}
-          <p class="muted">Gezielt geübt: {levelName(focus)}. Das zählt nicht fürs Meistern, dafür sorgen die normalen Runden.</p>
-        {/if}
+        <p class="muted">{modeLabel}</p>
         <p class="muted">{summary.count} Aufgaben, davon {summary.correct} richtig.</p>
         {#if summary.newlySure.length}
           <h2>Neu sicher</h2>
@@ -261,7 +267,7 @@
         {#if summary.trends.length}
           <h2>Denkzeit</h2>
           {#each summary.trends as t}
-            <p>{t.levelId}: {secs(t.before)} s → {secs(t.now)} s</p>
+            <p>{levelName(t.levelId)}: {secs(t.before)} s → {secs(t.now)} s</p>
           {/each}
         {/if}
       </div>

@@ -1,3 +1,4 @@
+import { nextChapter } from '../progress';
 import { itemByKey, levelById, LEVELS } from '../tasks';
 import { isDue } from './derive';
 import type { Attempt, Derived, Placement } from './types';
@@ -90,16 +91,10 @@ export function buildPlacementReport(p: Placement, attempts: Attempt[], derived:
   // Was als Nächstes kommt, nach dem aktuellen Lernstand
   const focus: string[] = [];
   const now = Date.now();
-  const due = [...derived.items.values()].filter((s) => itemByKey.get(s.key)?.type === 'fact' && isDue(s, now)).length;
-  if (due > 0) focus.push(`${due} Wiederholungen sind fällig, sie kommen in den nächsten Runden zuerst.`);
-  const newFrom = LEVELS.filter((l) => {
-    const ls = derived.levels.get(l.id)!;
-    return ls.unlocked && !ls.mastered && l.items.some((it) => (derived.items.get(it.key)?.box ?? 0) === 0);
-  }).map((l) => `${l.id} ${l.name}`);
-  if (newFrom.length) {
-    const list = newFrom.join(', ');
-    focus.push(due > 30 ? `Sobald höchstens 30 Wiederholungen fällig sind, kommt neuer Stoff mit Tipp-Karte dazu, aus: ${list}.` : `Neuer Stoff mit Tipp-Karte kommt aus: ${list}.`);
-  }
+  const due = [...derived.items.values()].filter((s) => itemByKey.has(s.key) && isDue(s, now)).length;
+  if (due > 0) focus.push(`${due} Wiederholungen sind fällig. Die Mischrunde auf der Startseite nimmt sie zuerst dran.`);
+  const next = nextChapter(derived);
+  if (next) focus.push(`Als Nächstes empfohlen: Kapitel ${next.id}, ${next.name}. Alle Kapitel sind offen, du kannst auch woanders anfangen.`);
 
   return {
     baselineSeconds: p.baselineMs / 1000,

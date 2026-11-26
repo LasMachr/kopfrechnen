@@ -86,14 +86,14 @@
     {#if newLevel}
       <div class="announce">
         <div class="small">Neues Thema</div>
-        <div class="atitle">{level.id} {level.name}</div>
+        <div class="atitle">{level.name}</div>
         {#if level.cards.length > 1}
           <div class="small">Tricks in diesem Thema: {level.cards.map((c) => c.title).join(' · ')}</div>
         {/if}
       </div>
     {/if}
     <div class="card tip">
-      <div class="muted small">{newLevel ? 'Der erste Trick' : `Neuer Trick · ${level.id} ${level.name}`}</div>
+      <div class="muted small">{newLevel ? 'Der erste Trick' : `Neuer Trick · ${level.name}`}</div>
       <h1>{card.title}</h1>
       {#each card.lines as line}
         <p>{line}</p>
