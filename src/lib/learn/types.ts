@@ -13,6 +13,9 @@ export interface Attempt {
   /** schnell falsch (vermutlich sicher geglaubt) */
   fast: boolean;
   kind: 'round' | 'placement';
+  /** Aufgabentext und Lösung (nur Einstufung, ab Version 0.2; ältere Einträge haben sie nicht) */
+  prompt?: string;
+  solution?: string;
 }
 
 export interface Placement {

@@ -6,7 +6,7 @@
   import type { Level } from '../lib/tasks';
   import { daysSinceBackup, parseBackup, restoreBackup, shareBackup } from '../lib/store/backup';
 
-  let { onback, onplacement }: { onback: () => void; onplacement: () => void } = $props();
+  let { onback, onplacement, onresult }: { onback: () => void; onplacement: () => void; onresult: () => void } = $props();
 
   const d = $derived(app.derived!);
   let open = $state<string | null>(null);
@@ -142,6 +142,10 @@
     </div>
 
     <h2>Einstufung</h2>
+    {#if app.placements.length}
+      <button class="btn" onclick={onresult}>Ergebnis des Einstufungstests</button>
+      <div class="gap"></div>
+    {/if}
     <button class="btn" onclick={onplacement}>Einstufungstest wiederholen</button>
     <div class="bottom"></div>
   </div>

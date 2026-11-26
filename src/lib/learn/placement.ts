@@ -1,5 +1,5 @@
 import { checkAnswer } from '../math/answer';
-import { r } from '../math/rational';
+import { format, r } from '../math/rational';
 import type { Rng } from '../math/rng';
 import { itemByKey, levelById } from '../tasks';
 import type { Task } from '../tasks';
@@ -8,6 +8,7 @@ import type { Attempt, Placement } from './types';
 
 // Kurzer Einstufungstest: höchstens 5 Minuten, setzt nur Startpunkte.
 
+export const HARD_FACT_COUNT = 15;
 export const PLACEMENT_MS = 5 * 60 * 1000;
 
 const TYPING: [number, number][] = [
@@ -33,6 +34,9 @@ interface Entry {
   key: string;
   correct: boolean;
   rawMs: number;
+  answer: string;
+  prompt: string;
+  solution: string;
 }
 
 export class PlacementRun {
@@ -77,8 +81,11 @@ export class PlacementRun {
         key = this.rng.pick(pool).key;
       }
       const task = itemByKey.get(key)!.make(this.rng);
-      if (q.section === '1.1') task.prompt = task.prompt.includes('÷') ? remakeAsProduct(key) : task.prompt;
-      if (q.section === '1.1') task.answer = r(productOf(key));
+      if (q.section === '1.1') {
+        task.prompt = remakeAsProduct(key);
+        task.answer = r(productOf(key));
+        task.answerText = undefined;
+      }
       this.current = { section: q.section, task };
       return this.current;
     }
@@ -88,7 +95,15 @@ export class PlacementRun {
   answer(raw: string, rawMs: number): boolean {
     const cur = this.current!;
     const correct = checkAnswer(raw, cur.task.answer, cur.task.kind);
-    this.entries.push({ section: cur.section, key: cur.task.itemKey, correct, rawMs });
+    this.entries.push({
+      section: cur.section,
+      key: cur.task.itemKey,
+      correct,
+      rawMs,
+      answer: raw,
+      prompt: cur.task.prompt,
+      solution: cur.task.answerText ?? format(cur.task.answer)
+    });
     const errors = this.entries.filter((e) => e.section === cur.section && !e.correct).length;
     if (cur.section !== 'tippen' && errors >= 2) this.skipped.add(cur.section);
     this.current = null;
@@ -127,7 +142,9 @@ export class PlacementRun {
       levelId: e.section,
       ts: now - (this.entries.length - i),
       roundId,
-      answer: '',
+      answer: e.answer,
+      prompt: e.prompt,
+      solution: e.solution,
       correct: e.correct,
       ms: e.rawMs,
       first: false,

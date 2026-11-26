@@ -8,6 +8,7 @@
   import Home from './screens/Home.svelte';
   import RoundScreen from './screens/RoundScreen.svelte';
   import Progress from './screens/Progress.svelte';
+  import PlacementResult from './screens/PlacementResult.svelte';
   import type { RoundData } from './lib/learn/round';
 
   let resumeData = $state.raw<RoundData | null>(null);
@@ -47,7 +48,11 @@
 {:else if app.screen === 'welcome'}
   <Welcome onstart={() => (app.screen = 'placement')} onskip={skipPlacement} />
 {:else if app.screen === 'placement'}
-  <PlacementScreen ondone={() => (app.screen = 'home')} />
+  <PlacementScreen ondone={() => (app.screen = 'placement-result')} />
+{:else if app.screen === 'placement-result'}
+  <PlacementResult onclose={() => (app.screen = 'home')} />
+{:else if app.screen === 'placement-review'}
+  <PlacementResult closeLabel="Zurück" onclose={() => (app.screen = 'progress')} />
 {:else if app.screen === 'home'}
   <Home onstart={() => startRound(false)} onresume={() => startRound(true)} onprogress={() => (app.screen = 'progress')} />
 {:else if app.screen === 'round'}
@@ -55,5 +60,5 @@
     <RoundScreen resume={resumeData} onexit={() => (app.screen = 'home')} />
   {/key}
 {:else if app.screen === 'progress'}
-  <Progress onback={() => (app.screen = 'home')} onplacement={() => (app.screen = 'placement')} />
+  <Progress onback={() => (app.screen = 'home')} onplacement={() => (app.screen = 'placement')} onresult={() => (app.screen = 'placement-review')} />
 {/if}

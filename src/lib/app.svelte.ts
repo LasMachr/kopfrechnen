@@ -3,7 +3,7 @@ import type { Attempt, Derived, Placement } from './learn/types';
 import type { RoundData } from './learn/round';
 import { db, deleteMeta, getMeta, setMeta } from './store/db';
 
-export type Screen = 'loading' | 'install' | 'welcome' | 'placement' | 'home' | 'round' | 'progress';
+export type Screen = 'loading' | 'install' | 'welcome' | 'placement' | 'placement-result' | 'placement-review' | 'home' | 'round' | 'progress';
 
 /** Gemeinsamer Zustand der App. */
 class AppState {
