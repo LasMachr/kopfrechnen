@@ -42,7 +42,13 @@ export interface RoundData {
   newThisRound: string[];
   intro: { levelId: string; remaining: number; items: string[] } | null;
   pendingCard: string | null;
+  /** die Karte eröffnet ein neues Thema (für die Ansage) */
+  pendingCardNewLevel?: boolean;
   seenCards: string[];
+  /** Gezielt üben: nur dieses Level, zählt nicht fürs Meistern */
+  focusLevel?: string | null;
+  cardQueue?: string[];
+  afterCard?: { key: string; first: boolean; source: CurrentTask['source'] } | null;
   masteredTarget: number;
   masteredDone: number;
   lastNewLevel: string | null;
@@ -73,7 +79,14 @@ const typeOf = (key: string) => {
   return def.type === 'fact' ? key.split(':')[0] : key;
 };
 
-export function newRoundData(derived: Derived, now: number, roundsToday: number, rng: Rng): RoundData {
+export interface RoundOptions {
+  /** schon gezeigte Tipp-Karten */
+  seenCards?: string[];
+  /** Gezielt üben: nur dieses Level */
+  focusLevel?: string;
+}
+
+export function newRoundData(derived: Derived, now: number, roundsToday: number, rng: Rng, opts: RoundOptions = {}): RoundData {
   const due = [...derived.items.values()].filter((s) => itemByKey.get(s.key)!.type === 'fact' && isDue(s, now));
   if (roundsToday >= 1) due.sort((a, b) => a.lastSeen - b.lastSeen);
   else due.sort((a, b) => a.box - b.box || a.due - b.due);
@@ -84,8 +97,10 @@ export function newRoundData(derived: Derived, now: number, roundsToday: number,
     if (s.recent.length) recentBefore[s.key] = s.recent.filter(Boolean).length / s.recent.length;
   }
   const levels = [...derived.levels.values()];
-  const seenCards = new Set<string>();
-  for (const s of derived.items.values()) if (s.box > 0) seenCards.add(itemByKey.get(s.key)!.card);
+  const seenCards = new Set<string>(opts.seenCards ?? []);
+  const focus = opts.focusLevel ? levelById.get(opts.focusLevel) : undefined;
+  const cardQueue = focus ? focus.cards.map((c) => c.id) : [];
+  const firstCard = cardQueue.shift() ?? null;
   return {
     id: `r${now.toString(36)}${Math.floor(rng.next() * 1e6).toString(36)}`,
     startedAt: now,
@@ -101,8 +116,12 @@ export function newRoundData(derived: Derived, now: number, roundsToday: number,
     chunkDone: [],
     newThisRound: [],
     intro: null,
-    pendingCard: null,
-    seenCards: [...seenCards],
+    pendingCard: firstCard,
+    pendingCardNewLevel: focus ? !focus.cards.some((c) => seenCards.has(c.id)) : false,
+    seenCards: [...seenCards, ...(firstCard ? [firstCard] : [])],
+    focusLevel: focus?.id ?? null,
+    cardQueue,
+    afterCard: null,
     masteredTarget: rng.int(2, 3),
     masteredDone: 0,
     lastNewLevel: null,
@@ -135,6 +154,11 @@ export class Round {
     const d = this.data;
     if (d.pendingCard) return { type: 'card', cardId: d.pendingCard };
     if (d.current) return { type: 'task', current: d.current };
+    if (d.afterCard) {
+      const a = d.afterCard;
+      d.afterCard = null;
+      return this.serve(a.key, a.first, a.source);
+    }
 
     if (this.timeUp) d.ending = true;
     if (d.ending) {
@@ -150,6 +174,8 @@ export class Round {
       const [q] = d.requeue.splice(ri, 1);
       return this.serve(q.key, false, 'requeue');
     }
+
+    if (d.focusLevel) return this.serve(this.focusKey(d.focusLevel), false, 'practice');
 
     // 2. Einführungsblock eines neuen Levels oder Tricks
     if (d.intro && d.intro.remaining > 0) {
@@ -205,6 +231,27 @@ export class Round {
     const extra = this.extraKeys();
     if (extra.length) return this.serve(this.rng.pick(extra), false, 'extra');
     return { type: 'end' };
+  }
+
+  /** Gezielt üben: schwächere Aufgaben öfter. */
+  focusKey(levelId: string): string {
+    const level = levelById.get(levelId)!;
+    const keys = level.items.map((it) => it.key);
+    const weights = keys.map((k) => {
+      const st = this.derived.items.get(k)!;
+      const missed = (this.data.triesInRound[k] ?? 0) > 0 ? 0.5 : 1;
+      if (itemByKey.get(k)!.type === 'subtype') {
+        const q = st.recent.length ? st.recent.filter(Boolean).length / st.recent.length : 0.5;
+        return (1 + (1 - q) * 2) * missed;
+      }
+      return (st.box <= 1 ? 3 : st.box <= 3 ? 2 : 1) * missed;
+    });
+    let x = this.rng.next() * weights.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < keys.length; i++) {
+      x -= weights[i];
+      if (x <= 0) return keys[i];
+    }
+    return keys[keys.length - 1];
   }
 
   /** Untertypen aktiver (freigeschalteter, nicht gemeisterter) Level, die schon eingeführt sind. */
@@ -278,6 +325,7 @@ export class Round {
     const levelStarted = ls.started || level.items.some((it) => d.askedFirst.includes(it.key));
     const cardId = chunk[0].card;
     if (!d.seenCards.includes(cardId)) {
+      d.pendingCardNewLevel = !level.cards.some((c) => d.seenCards.includes(c.id));
       d.pendingCard = cardId;
       d.seenCards.push(cardId);
       d.intro = { levelId: level.id, remaining: levelStarted ? TRICK_BLOCK : INTRO_BLOCK, items: keys };
@@ -287,11 +335,29 @@ export class Round {
 
   /** Die Tipp-Karte samt geführten Beispielen ist durch. */
   cardDone(): void {
-    this.data.pendingCard = null;
+    const d = this.data;
+    const nextCard = d.cardQueue?.shift();
+    if (nextCard) {
+      d.pendingCard = nextCard;
+      d.pendingCardNewLevel = false;
+      if (!d.seenCards.includes(nextCard)) d.seenCards.push(nextCard);
+    } else {
+      d.pendingCard = null;
+      d.pendingCardNewLevel = false;
+    }
   }
 
   private serve(key: string, first: boolean, source: CurrentTask['source']): Step {
     const def = itemByKey.get(key)!;
+    // Wichtige Tricks kommen vorab: Hat diese Aufgabe eine noch nie gezeigte Tipp-Karte, erst die Karte.
+    if (!this.data.focusLevel && !this.data.seenCards.includes(def.card)) {
+      const level = levelById.get(def.key.slice(0, 3))!;
+      this.data.pendingCardNewLevel = !level.cards.some((c) => this.data.seenCards.includes(c.id));
+      this.data.pendingCard = def.card;
+      this.data.seenCards.push(def.card);
+      this.data.afterCard = { key, first, source };
+      return { type: 'card', cardId: def.card };
+    }
     const task = def.make(this.rng);
     if (first && def.type === 'fact') this.data.askedFirst.push(key);
     // Neu eingeführte Aufgaben zählen in dieser Runde nicht
@@ -309,6 +375,7 @@ export class Round {
     const level = levelById.get(task.levelId)!;
     const ls = this.derived.levels.get(level.id)!;
     const correct = checkAnswer(raw, task.answer, task.kind);
+    const focus = !!d.focusLevel;
     let ms: number | null = Math.max(0, rawMs - this.derived.baselineMs);
     if (interrupted || rawMs > 60000) ms = null;
     const fast = !correct && ms !== null && ms < fastThreshold(ls, level);
@@ -320,11 +387,12 @@ export class Round {
       answer: raw,
       correct,
       ms,
-      first: cur.first,
-      fast: fast && cur.first,
-      kind: 'round'
+      first: focus ? false : cur.first,
+      fast: !focus && fast && cur.first,
+      kind: focus ? 'practice' : 'round'
     };
-    applyAttempt(attempt, this.derived.items, this.derived.levels);
+    // Gezielt üben ändert den Lernstand nicht
+    if (!focus) applyAttempt(attempt, this.derived.items, this.derived.levels);
 
     d.triesInRound[task.itemKey] = (d.triesInRound[task.itemKey] ?? 0) + 1;
     d.results.push({ key: task.itemKey, levelId: task.levelId, correct, ms, first: cur.first });

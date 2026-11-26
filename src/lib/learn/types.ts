@@ -12,7 +12,8 @@ export interface Attempt {
   first: boolean;
   /** schnell falsch (vermutlich sicher geglaubt) */
   fast: boolean;
-  kind: 'round' | 'placement';
+  /** 'practice' = gezielt geübt: zählt nicht für Fächer und Meistern */
+  kind: 'round' | 'placement' | 'practice';
   /** Aufgabentext und Lösung (nur Einstufung, ab Version 0.2; ältere Einträge haben sie nicht) */
   prompt?: string;
   solution?: string;

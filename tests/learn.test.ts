@@ -240,3 +240,46 @@ describe('Meistern', () => {
     expect(checkMastery(level, ls, d.items, T0 + 8 * DAY)).toBe(false);
   });
 });
+
+describe('Tipp-Karten und gezieltes Üben', () => {
+  it('zeigt eine noch nie gesehene Karte vor der ersten Aufgabe, auch bei Fakten aus der Einstufung', () => {
+    const p: Placement = { ts: T0, baselineMs: 0, seeds: { '1.1:9x7': 2 }, unlocked: [] };
+    const rng = createRng(3);
+    const derived = derive([], [p]);
+    const r = new Round(newRoundData(derived, T0 + 1000, 0, rng), derived, rng);
+    const s1 = r.next();
+    expect(s1.type).toBe('card');
+    if (s1.type === 'card') expect(s1.cardId).toBe('1.1-neun');
+    expect(r.data.pendingCardNewLevel).toBe(true);
+    r.cardDone();
+    const s2 = r.next();
+    expect(s2.type).toBe('task');
+    if (s2.type === 'task') expect(s2.current.task.itemKey).toBe('1.1:9x7');
+  });
+
+  it('gezielt üben: alle Tipps zuerst, nur Aufgaben aus dem Thema, zählt nicht', () => {
+    const rng = createRng(4);
+    const derived = derive([], []);
+    const r = new Round(newRoundData(derived, T0, 0, rng, { focusLevel: '1.B' }), derived, rng);
+    const cards: string[] = [];
+    let step = r.next();
+    while (step.type === 'card') {
+      cards.push(step.cardId);
+      r.cardDone();
+      step = r.next();
+    }
+    expect(cards).toEqual(['1.B-plusminus', '1.B-mal', '1.B-geteilt']);
+    for (let i = 0; i < 30; i++) {
+      if (step.type !== 'task') break;
+      expect(step.current.task.levelId).toBe('1.B');
+      const t = step.current.task;
+      const res = r.answer(format(t.answer, { group: false }), 2000, false, T0 + i * 5000);
+      expect(res.attempt.kind).toBe('practice');
+      expect(res.attempt.first).toBe(false);
+      step = r.next();
+    }
+    expect(derived.levels.get('1.B')!.started).toBe(false);
+    const after = derive([{ ...att({ itemKey: '1.B.mal', levelId: '1.B', kind: 'practice' }) }], []);
+    expect(after.levels.get('1.B')!.unlocked).toBe(false);
+  });
+});

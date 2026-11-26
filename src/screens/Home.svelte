@@ -2,8 +2,17 @@
   import { onMount } from 'svelte';
   import { app } from '../lib/app.svelte';
   import { daysSinceBackup } from '../lib/store/backup';
+  import { levelById } from '../lib/tasks';
 
-  let { onstart, onresume, onprogress }: { onstart: () => void; onresume: () => void; onprogress: () => void } = $props();
+  let {
+    onstart,
+    onresume,
+    onprogress,
+    ontopics,
+    onfocus
+  }: { onstart: () => void; onresume: () => void; onprogress: () => void; ontopics: () => void; onfocus: (levelId: string) => void } = $props();
+
+  const fresh = $derived(app.newlyUnlocked);
 
   let backupReminder = $state(false);
 
@@ -27,6 +36,19 @@
       <button class="link" onclick={update}>Aktualisieren</button>
     </div>
   {/if}
+  {#if fresh.length}
+    <div class="announce">
+      <div class="small">Neu freigeschaltet</div>
+      {#each fresh as id}
+        <div class="aline"><b>{id} {levelById.get(id)?.name}</b></div>
+      {/each}
+      <div class="small">Die Tipps dazu kommen in der nächsten Runde, bevor die erste Aufgabe dran ist.</div>
+      <div class="arow">
+        <button class="abtn" onclick={() => { const id = fresh[0]; app.acknowledgeUnlocked(); onfocus(id); }}>Gleich gezielt üben</button>
+        <button class="abtn ghost" onclick={() => app.acknowledgeUnlocked()}>OK</button>
+      </div>
+    </div>
+  {/if}
   <div class="grow"></div>
   {#if app.resumable}
     <button class="btn primary big" onclick={onresume}>Runde fortsetzen</button>
@@ -35,6 +57,8 @@
   {:else}
     <button class="btn primary big" onclick={onstart}>Runde starten</button>
   {/if}
+  <div class="gap"></div>
+  <button class="btn" onclick={ontopics}>Gezielt üben</button>
   <div class="gap"></div>
   <button class="btn" onclick={onprogress}>Fortschritt</button>
   {#if backupReminder}
@@ -61,6 +85,39 @@
     border-radius: var(--radius);
     padding: 6px 16px;
     margin-top: 8px;
+  }
+  .announce {
+    margin-top: 12px;
+    background: var(--accent);
+    color: var(--accent-text);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .small {
+    font-size: 0.88rem;
+  }
+  .aline {
+    font-size: 1.15rem;
+    margin: 2px 0;
+  }
+  .arow {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .abtn {
+    flex: 1;
+    padding: 10px;
+    border-radius: 10px;
+    background: var(--accent-text);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .abtn.ghost {
+    flex: 0 0 70px;
+    background: transparent;
+    color: var(--accent-text);
+    border: 1px solid var(--accent-text);
   }
   .reminder {
     margin-top: 16px;

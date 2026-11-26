@@ -304,6 +304,7 @@ export function run(profile: Profile, habit: Habit, days: number, seed: number):
   };
   rec(derive(attempts, placements), 0);
 
+  let seenCards: string[] = [];
   for (let day = 0; day < days; day++) {
     const n = habit.rounds(day, rng);
     if (n > 0) stats.daysPractised++;
@@ -311,7 +312,7 @@ export function run(profile: Profile, habit: Habit, days: number, seed: number):
     for (let ri = 0; ri < n; ri++) {
       const derived = derive(attempts, placements);
       const masteredBefore = new Set([...derived.levels.values()].filter((l) => l.mastered).map((l) => l.id));
-      const data = newRoundData(derived, now, roundsOnDay(attempts, now), appRng);
+      const data = newRoundData(derived, now, roundsOnDay(attempts, now), appRng, { seenCards });
       const round = new Round(data, derived, appRng);
       const log: RoundLog = { day, idx: ri, tasks: 0, firstTasks: 0, correct: 0, firstCorrect: 0, dueAtStart: data.dueAtStart, dueLeftAtEnd: 0, newIntro: 0, bySource: {}, byLevel: {}, cards: 0, blockedNew: data.dueAtStart > 30 };
       let guard = 0;
@@ -329,6 +330,7 @@ export function run(profile: Profile, habit: Habit, days: number, seed: number):
             for (const k of round.data.chunk) learner.update(k, levelOfItemKey(k), null, now);
             now += 45000;
             round.cardDone();
+            seenCards = round.data.seenCards;
             continue;
           }
           const cur = step.current;

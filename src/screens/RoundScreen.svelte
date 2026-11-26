@@ -5,12 +5,12 @@
   import { newRoundData, Round, ROUND_MS, roundsOnDay, type CurrentTask, type Feedback, type RoundData, type RoundSummary } from '../lib/learn/round';
   import { format } from '../lib/math/rational';
   import { createRng } from '../lib/math/rng';
-  import { levelById } from '../lib/tasks';
+  import { cardById, itemByKey, levelById } from '../lib/tasks';
   import Keypad from '../components/Keypad.svelte';
   import AnswerBox from '../components/AnswerBox.svelte';
   import TipCard from '../components/TipCard.svelte';
 
-  let { resume, onexit }: { resume: RoundData | null; onexit: () => void } = $props();
+  let { resume, focusLevel = null, onexit }: { resume: RoundData | null; focusLevel?: string | null; onexit: () => void } = $props();
 
   const rng = createRng();
   let round: Round;
@@ -18,6 +18,9 @@
   type Phase = 'card' | 'task' | 'ok' | 'bad' | 'end';
   let phase = $state<Phase>('task');
   let cardId = $state<string | null>(null);
+  let cardNewLevel = $state(false);
+  let showTip = $state(false);
+  let focus = $state<string | null>(null);
   let current = $state.raw<CurrentTask | null>(null);
   let input = $state('');
   let locked = $state(false);
@@ -39,7 +42,8 @@
   onMount(() => {
     const derived = derive(app.attempts, app.placements);
     const now = Date.now();
-    const data = resume ?? newRoundData(derived, now, roundsOnDay(app.attempts, now), rng);
+    const data = resume ?? newRoundData(derived, now, roundsOnDay(app.attempts, now), rng, { seenCards: app.seenCards, focusLevel: focusLevel ?? undefined });
+    focus = data.focusLevel ?? null;
     if (resume) data.current = null; // angefangene Aufgabe verwerfen
     round = new Round(data, derived, rng);
     elapsed = data.elapsedMs;
@@ -95,7 +99,9 @@
     const step = round.next();
     if (step.type === 'card') {
       cardId = step.cardId;
+      cardNewLevel = !!round.data.pendingCardNewLevel;
       phase = 'card';
+      app.markCardsSeen([step.cardId]);
       return;
     }
     if (step.type === 'end') {
@@ -106,6 +112,7 @@
     input = '';
     feedback = null;
     showSteps = false;
+    showTip = false;
     taskLeft = 1;
     phase = 'task';
     interrupted = false;
@@ -163,7 +170,7 @@
   function again() {
     const derived = derive(app.attempts, app.placements);
     const now = Date.now();
-    round = new Round(newRoundData(derived, now, roundsOnDay(app.attempts, now), rng), derived, rng);
+    round = new Round(newRoundData(derived, now, roundsOnDay(app.attempts, now), rng, { seenCards: app.seenCards, focusLevel: focus ?? undefined }), derived, rng);
     elapsed = 0;
     summary = null;
     loadNext();
@@ -178,12 +185,15 @@
   {#if phase !== 'end'}
     <div class="topbar">
       <button class="link" onclick={endEarly}>Beenden</button>
+      {#if focus}<span class="focus muted">{focus}</span>{/if}
       <div class="bar" aria-hidden="true"><div class="fill" style:width="{Math.min(100, (elapsed / ROUND_MS) * 100)}%"></div></div>
     </div>
   {/if}
 
   {#if phase === 'card' && cardId}
-    <div class="grow"><TipCard {cardId} ondone={cardDone} /></div>
+    {#key cardId}
+      <div class="grow"><TipCard {cardId} newLevel={cardNewLevel} ondone={cardDone} /></div>
+    {/key}
   {:else if (phase === 'task' || phase === 'ok' || phase === 'bad') && current}
     <div class="task">
       <div class="prompt-area">
@@ -208,6 +218,15 @@
           {:else}
             <button class="link" onclick={() => (showSteps = true)}>Rechenweg zeigen</button>
           {/if}
+          {#if showTip}
+            {@const tip = cardById.get(itemByKey.get(current.task.itemKey)!.card)!}
+            <div class="tipbox">
+              <b>{tip.title}</b>
+              {#each tip.lines as line}<div>{line}</div>{/each}
+            </div>
+          {:else}
+            <button class="link" onclick={() => (showTip = true)}>Tipp ansehen</button>
+          {/if}
         </div>
         <button class="btn primary" onclick={next}>Weiter</button>
       {:else}
@@ -231,6 +250,9 @@
     {:else}
       <div class="end scroll">
         <h1>Runde fertig</h1>
+        {#if focus}
+          <p class="muted">Gezielt geübt: {levelName(focus)}. Das zählt nicht fürs Meistern, dafür sorgen die normalen Runden.</p>
+        {/if}
         <p class="muted">{summary.count} Aufgaben, davon {summary.correct} richtig.</p>
         {#if summary.newlySure.length}
           <h2>Neu sicher</h2>
@@ -345,6 +367,15 @@
   }
   .bad {
     color: var(--bad);
+  }
+  .tipbox {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border-radius: 10px;
+  }
+  .focus {
+    font-size: 0.9rem;
   }
   .hint {
     margin-top: 10px;

@@ -3,15 +3,16 @@
   import { checkAnswer } from '../lib/math/answer';
   import { format } from '../lib/math/rational';
   import { createRng } from '../lib/math/rng';
-  import { cardById, itemByKey } from '../lib/tasks';
+  import { cardById, itemByKey, levelById } from '../lib/tasks';
   import type { Task } from '../lib/tasks';
   import Keypad from './Keypad.svelte';
   import AnswerBox from './AnswerBox.svelte';
 
-  let { cardId, ondone }: { cardId: string; ondone: () => void } = $props();
+  let { cardId, newLevel = false, ondone }: { cardId: string; newLevel?: boolean; ondone: () => void } = $props();
 
   const EXAMPLES = 2;
   const card = $derived(cardById.get(cardId)!);
+  const level = $derived(levelById.get(card.example.slice(0, 3))!);
   const rng = createRng();
 
   let phase = $state<'card' | 'guided'>('card');
@@ -82,8 +83,17 @@
 
 {#if phase === 'card'}
   <div class="wrap">
+    {#if newLevel}
+      <div class="announce">
+        <div class="small">Neues Thema</div>
+        <div class="atitle">{level.id} {level.name}</div>
+        {#if level.cards.length > 1}
+          <div class="small">Tricks in diesem Thema: {level.cards.map((c) => c.title).join(' · ')}</div>
+        {/if}
+      </div>
+    {/if}
     <div class="card tip">
-      <div class="muted small">Neuer Trick</div>
+      <div class="muted small">{newLevel ? 'Der erste Trick' : `Neuer Trick · ${level.id} ${level.name}`}</div>
       <h1>{card.title}</h1>
       {#each card.lines as line}
         <p>{line}</p>
@@ -91,6 +101,7 @@
     </div>
     <div class="spacer"></div>
     <button class="btn primary" onclick={startGuided}>Beispiele selbst rechnen</button>
+    <button class="link skip" onclick={ondone}>Ohne Beispiele weiter</button>
   </div>
 {:else if task}
   <div class="wrap">
@@ -127,6 +138,22 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+  }
+  .announce {
+    background: var(--accent);
+    color: var(--accent-text);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin: 4px 0 12px;
+  }
+  .atitle {
+    font-size: 1.3rem;
+    font-weight: 700;
+    margin: 2px 0;
+  }
+  .skip {
+    align-self: center;
+    margin-top: 6px;
   }
   .tip p {
     margin: 6px 0;

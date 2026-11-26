@@ -82,6 +82,7 @@
   </div>
   <div class="scroll content">
     <h1>Fortschritt</h1>
+    <p class="muted small">Tippe auf ein Thema, um seine Tipps zu sehen.</p>
 
     <h2>Kleines Einmaleins</h2>
     <div class="grid" role="img" aria-label="Einmaleins-Raster">
@@ -111,16 +112,15 @@
         </button>
         {#if open === l.id}
           <div class="cards">
-            {#if ls.unlocked}
-              {#each l.cards as c}
-                <div class="card tip">
-                  <b>{c.title}</b>
-                  {#each c.lines as line}<div>{line}</div>{/each}
-                </div>
-              {/each}
-            {:else}
-              <p class="muted">Öffnet, sobald {l.unlockAfter.join(', ')} gemeistert {l.unlockAfter.length > 1 ? 'sind' : 'ist'}.</p>
+            {#if !ls.unlocked}
+              <p class="muted">Öffnet, sobald {l.unlockAfter.join(', ')} gemeistert {l.unlockAfter.length > 1 ? 'sind' : 'ist'}. Die Tipps kannst du schon lesen.</p>
             {/if}
+            {#each l.cards as c}
+              <div class="card tip">
+                <b>{c.title}</b>
+                {#each c.lines as line}<div>{line}</div>{/each}
+              </div>
+            {/each}
           </div>
         {/if}
       {/each}

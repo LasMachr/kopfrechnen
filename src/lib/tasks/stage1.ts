@@ -5,33 +5,69 @@ import type { ItemDef, Level, Task } from './types';
 
 // ---------- 1.1 Kleines Einmaleins ----------
 
-function factSteps(a: number, b: number): { steps: string[]; parts: ReturnType<typeof part>[] } {
+type Steps = { steps: string[]; parts: ReturnType<typeof part>[] };
+
+/** Welche Tipp-Karte zu einem Einmaleins-Fakt gehört. */
+export function card11(a: number, b: number): string {
+  const has = (x: number) => a === x || b === x;
+  if (has(10) || has(2)) return '1.1-leicht';
+  if (has(9)) return '1.1-neun';
+  if (has(5)) return '1.1-leicht';
+  if (has(4) || has(8)) return '1.1-verdoppeln';
+  return '1.1-anker';
+}
+
+/** Rechenweg passend zur Tipp-Karte. */
+function factSteps(a: number, b: number): Steps {
   const p = a * b;
-  if (Math.abs(a - b) === 1) {
-    const s = Math.min(a, b);
-    // a·b = s·s + s
+  const card = card11(a, b);
+  const other = (x: number) => (a === x ? b : a);
+  if (card === '1.1-leicht') {
+    if (a === 10 || b === 10) {
+      const o = other(10);
+      return { steps: [`${a} ${M} ${b}: Null anhängen → ${p}`], parts: [part(`${o} ${M} 10`, p)] };
+    }
+    if (a === 2 || b === 2) {
+      const o = other(2);
+      return { steps: [`${a} ${M} ${b} = ${o} + ${o} = ${p}`], parts: [part(`${o} + ${o}`, p)] };
+    }
+    const o = other(5);
     return {
-      steps: [`${a} ${M} ${b} = ${s} ${M} ${s} + ${s} = ${s * s} + ${s} = ${p}`],
-      parts: [part(`${s} ${M} ${s}`, s * s), part(`${s * s} + ${s}`, p)]
+      steps: [`${a} ${M} ${b} = ${o} ${M} 10 ${D} 2 = ${10 * o} ${D} 2 = ${p}`],
+      parts: [part(`${o} ${M} 10`, 10 * o), part(`${10 * o} ${D} 2`, p)]
     };
   }
-  if (a === 9 || b === 9) {
-    const o = a === 9 ? b : a;
+  if (card === '1.1-neun') {
+    const o = other(9);
     return {
       steps: [`9 ${M} ${o} = 10 ${M} ${o} ${MINUS} ${o} = ${10 * o} ${MINUS} ${o} = ${p}`],
       parts: [part(`10 ${M} ${o}`, 10 * o), part(`${10 * o} ${MINUS} ${o}`, p)]
     };
   }
-  const big = Math.max(a, b);
-  const small = Math.min(a, b);
-  if (big >= 6 && big <= 8 && small >= 3) {
-    const rest = big - 5;
+  if (card === '1.1-verdoppeln') {
+    const f = a === 8 || b === 8 ? 8 : 4;
+    const o = other(f);
+    const chain = f === 8 ? [2 * o, 4 * o, 8 * o] : [2 * o, 4 * o];
     return {
-      steps: [`${small} ${M} ${big} = ${small} ${M} 5 + ${small} ${M} ${rest} = ${small * 5} + ${small * rest} = ${p}`],
-      parts: [part(`${small} ${M} 5`, small * 5), part(`${small} ${M} ${rest}`, small * rest), part(`${small * 5} + ${small * rest}`, p)]
+      steps: [`${a} ${M} ${b}: ${o} verdoppeln${f === 8 ? ' (dreimal)' : ' (zweimal)'}: ${chain.join(' → ')}`],
+      parts: chain.map((v, i) => part(i === 0 ? `${o} + ${o}` : `${chain[i - 1]} verdoppeln`, v))
     };
   }
-  return { steps: [`${a} ${M} ${b} = ${p}`], parts: [part(`${a} ${M} ${b}`, p)] };
+  // Anker: Quadrate, Nachbarn, ×3 und ×6
+  if (a === b) return { steps: [`${a} ${M} ${b} = ${p} (Quadrat, auswendig)`], parts: [part(`${a} ${M} ${b}`, p)] };
+  if (Math.abs(a - b) === 1) {
+    const sq = Math.min(a, b);
+    return {
+      steps: [`${a} ${M} ${b} = ${sq} ${M} ${sq} + ${sq} = ${sq * sq} + ${sq} = ${p}`],
+      parts: [part(`${sq} ${M} ${sq}`, sq * sq), part(`${sq * sq} + ${sq}`, p)]
+    };
+  }
+  if (a === 3 || b === 3) {
+    const o = other(3);
+    return { steps: [`${a} ${M} ${b} = 2 ${M} ${o} + ${o} = ${2 * o} + ${o} = ${p}`], parts: [part(`2 ${M} ${o}`, 2 * o), part(`${2 * o} + ${o}`, p)] };
+  }
+  const o = other(6);
+  return { steps: [`${a} ${M} ${b} = 5 ${M} ${o} + ${o} = ${5 * o} + ${o} = ${p}`], parts: [part(`5 ${M} ${o}`, 5 * o), part(`${5 * o} + ${o}`, p)] };
 }
 
 function difficulty11(a: number, b: number): number {
@@ -46,7 +82,7 @@ for (let a = 2; a <= 10; a++)
       key: `1.1:${a}x${b}`,
       type: 'fact',
       label: `${a}${M}${b}`,
-      card: a === 9 || b === 9 ? '1.1-neun' : '1.1-ableiten',
+      card: card11(a, b),
       chunk: 0,
       make: (rng: Rng): Task => {
         const p = a * b;
@@ -468,16 +504,28 @@ export const stage1: Level[] = [
     items: facts11,
     cards: [
       {
-        id: '1.1-ableiten',
-        title: 'Von leichten Fakten ableiten',
-        lines: ['Was du nicht weißt, leitest du aus einem Nachbarn ab.', '7·8 = 7·7 + 7 = 56', '6·7 = 6·5 + 6·2 = 30 + 12 = 42', 'Ziel ist Abrufen, nicht Rechnen.'],
-        example: '1.1:7x8'
+        id: '1.1-leicht',
+        title: 'Die leichten Reihen zuerst',
+        lines: ['×10: Null anhängen. 7·10 = 70', '×2: verdoppeln. 2·8 = 8 + 8 = 16', '×5: die Hälfte von ×10. 5·7 = 70 ÷ 2 = 35', 'Tauschen spart die Hälfte: 7·8 = 8·7'],
+        example: '1.1:5x7'
+      },
+      {
+        id: '1.1-verdoppeln',
+        title: '×4 und ×8 durch Verdoppeln',
+        lines: ['×4 = zweimal verdoppeln:', '4·7: 14 → 28', '×8 = dreimal verdoppeln:', '8·7: 14 → 28 → 56'],
+        example: '1.1:8x7'
       },
       {
         id: '1.1-neun',
-        title: '9er-Reihe',
-        lines: ['Mal 9 ist mal 10 minus die Zahl.', '9·7 = 70 − 7 = 63'],
+        title: '×9 = ×10 minus die Zahl',
+        lines: ['9·7 = 70 − 7 = 63', 'Probe: Die Ziffern ergeben zusammen 9 (6 + 3).'],
         example: '1.1:9x7'
+      },
+      {
+        id: '1.1-anker',
+        title: 'Von Ankern ableiten',
+        lines: ['Quadrate auswendig: 6·6 = 36, 7·7 = 49', 'Nachbar vom Quadrat: 6·7 = 6·6 + 6 = 42', '×3 = ×2 plus einmal: 3·7 = 14 + 7 = 21', '×6 = ×5 plus einmal: 6·3 = 15 + 3 = 18'],
+        example: '1.1:6x7'
       }
     ]
   },
@@ -494,7 +542,7 @@ export const stage1: Level[] = [
       {
         id: '1.2-quadrate',
         title: 'Quadrate bis 25',
-        lines: ['Quadrate bis 25² auswendig lernen.', 'Sie sind Bausteine für spätere Tricks.', '17² = 100 + 140 + 49 = 289'],
+        lines: ['Quadrate bis 25² auswendig lernen.', 'Zum Herleiten: (10 + a)² = 100 + 20·a + a²', '17² = 100 + 140 + 49 = 289', 'Sie sind Bausteine für spätere Tricks.'],
         example: '1.2:q17'
       }
     ]
@@ -518,7 +566,7 @@ export const stage1: Level[] = [
     targetMs: 8000,
     items: items14,
     cards: [
-      { id: '1.4-x5', title: 'Mal 5', lines: ['Mal 5 = mal 10, dann halbieren.', '68·5 = 680 ÷ 2 = 340', 'Nicht jede Aufgabe hat einen Trick: erst prüfen.'], example: '1.4.x5' },
+      { id: '1.4-x5', title: 'Mal 5', lines: ['Mal 5 = mal 10, dann halbieren.', '68·5 = 680 ÷ 2 = 340', 'Auch ungerade: 47·5 = 470 ÷ 2 = 235', 'Nicht jede Aufgabe hat einen Trick: erst prüfen.'], example: '1.4.x5' },
       { id: '1.4-x25', title: 'Mal 25', lines: ['Mal 25 = mal 100, dann durch 4.', '36·25 = 3600 ÷ 4 = 900'], example: '1.4.x25' },
       { id: '1.4-x9', title: 'Mal 9', lines: ['Mal 9 = mal 10 minus die Zahl.', '47·9 = 470 − 47 = 423'], example: '1.4.x9' },
       {
@@ -592,7 +640,7 @@ export const stage1: Level[] = [
     targetMs: 8000,
     items: items1A,
     cards: [
-      { id: '1.A-plus', title: 'Runden und ausgleichen', lines: ['67 + 48 = 67 + 50 − 2 = 115'], example: '1.A.plus' },
+      { id: '1.A-plus', title: 'Runden und ausgleichen', lines: ['Auf den nächsten Zehner runden, dann ausgleichen:', '67 + 48 = 67 + 50 − 2 = 115', 'Oder erst Zehner, dann Einer:', '67 + 48 = 107 + 8 = 115'], example: '1.A.plus' },
       { id: '1.A-minus', title: 'Minus mit Ausgleich', lines: ['503 − 178 = 503 − 180 + 2', '= 323 + 2 = 325', 'Oder ergänzen: von 178 bis 503.'], example: '1.A.minus' }
     ]
   },
@@ -605,9 +653,9 @@ export const stage1: Level[] = [
     targetMs: 8000,
     items: items1B,
     cards: [
-      { id: '1.B-plusminus', title: 'Komma unter Komma', lines: ['4,5 + 2,75: als 4,50 + 2,75 denken', '= 7,25'], example: '1.B.plusminus' },
+      { id: '1.B-plusminus', title: 'Komma unter Komma', lines: ['Fehlende Stellen mit 0 auffüllen:', '4,5 + 2,75 = 4,50 + 2,75 = 7,25', 'Dann rechnen wie mit ganzen Zahlen.'], example: '1.B.plusminus' },
       { id: '1.B-mal', title: 'Kommastellen zählen', lines: ['Ohne Komma rechnen, dann Stellen zählen:', '0,3·0,4: 3·4 = 12, zwei Stellen → 0,12'], example: '1.B.mal' },
-      { id: '1.B-geteilt', title: 'Beide Zahlen verschieben', lines: ['Bei Division beide Zahlen gleich verschieben:', '6 ÷ 0,2 = 60 ÷ 2 = 30'], example: '1.B.geteilt' }
+      { id: '1.B-geteilt', title: 'Beide Zahlen verschieben', lines: ['Beide Zahlen gleich verschieben, bis der Teiler ganz ist:', '6 ÷ 0,2 = 60 ÷ 2 = 30', 'Merke: ÷ 0,5 ist dasselbe wie × 2.'], example: '1.B.geteilt' }
     ]
   },
   {
